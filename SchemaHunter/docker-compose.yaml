@@ -1,0 +1,143 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SchemaHunter — local development stack
+#   • MSSQL  (Context 1: Procurement + Context 2: InfrastructureRegistry)
+#   • MongoDB (Context 3: CommunityAudits)
+#   • MySQL   (reserved / future context)
+#   • mssql-init — runs scripts/mssql/*.sql via sqlcmd (one-shot, exits 0)
+#   • mongo-init  — runs scripts/mongo/*.js  via mongosh (one-shot, exits 0)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ─── SQL Server ─────────────────────────────────────────────────────────────
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: schemahunter_mssql
+    environment:
+      SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q 'SELECT 1' -C -b"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ─── MongoDB ────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:8
+    container_name: schemahunter_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_ROOT_USER}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD}"
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "mongosh --quiet --eval \"db.adminCommand('ping').ok\" || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ─── MySQL ───────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8
+    container_name: schemahunter_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-SchemaHunterMysql}"
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "mysqladmin ping -h localhost -p$${MYSQL_ROOT_PASSWORD} --silent"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ─── MSSQL Init ──────────────────────────────────────────────────────────────
+  # Runs all scripts/mssql/*.sql files (sorted) once, then exits.
+  # Uses the official MSSQL image which ships sqlcmd at /opt/mssql-tools18/bin.
+  mssql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: schemahunter_mssql_init
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+    volumes:
+      - ./scripts/mssql:/scripts/mssql:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        echo "==> Running MSSQL init scripts..."
+        for f in $(ls /scripts/mssql/*.sql 2>/dev/null | sort); do
+          echo "    Executing: $$f"
+          /opt/mssql-tools18/bin/sqlcmd \
+            -S mssql,1433 \
+            -U sa \
+            -P "$${MSSQL_SA_PASSWORD}" \
+            -C \
+            -I \
+            -b \
+            -i "$$f"
+          echo "    Done: $$f"
+        done
+        echo "==> MSSQL init complete."
+    restart: on-failure
+
+  # ─── MongoDB Init ─────────────────────────────────────────────────────────────
+  # Runs all scripts/mongo/*.js files (sorted) once, then exits.
+  # Uses the official mongo:7 image which ships mongosh.
+  mongo-init:
+    image: mongo:8
+    container_name: schemahunter_mongo_init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USER: "${MONGO_ROOT_USER}"
+      MONGO_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD}"
+      MONGO_AUDITS_DB: "${MONGO_AUDITS_DB:-SchemaHunterAudits}"
+    volumes:
+      - ./scripts/mongo:/scripts/mongo:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        echo "==> Running MongoDB init scripts..."
+        URI="mongodb://$${MONGO_ROOT_USER}:$${MONGO_ROOT_PASSWORD}@mongodb:27017"
+        for f in $(ls /scripts/mongo/*.js 2>/dev/null | sort); do
+          echo "    Executing: $$f"
+          MONGO_AUDITS_DB="$${MONGO_AUDITS_DB}" mongosh "$$URI" "$$f" --quiet
+          echo "    Done: $$f"
+        done
+        echo "==> MongoDB init complete."
+    restart: on-failure
+
+volumes:
+  mssql_data:
+  mongo_data:
+  mysql_data:

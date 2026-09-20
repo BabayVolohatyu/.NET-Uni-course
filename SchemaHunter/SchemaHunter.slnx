@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SchemaHunter.InfrastructureRegistry.Persistence/SchemaHunter.InfrastructureRegistry.Persistence.csproj" />
+  </Folder>
+  <Project Path="SchemaHunter.csproj" />
+  <Project Path="Procurement/SchemaHunter.Procurement.csproj" />
+  <Project Path="CommunityAudits/SchemaHunter.CommunityAudits.csproj" />
+</Solution>

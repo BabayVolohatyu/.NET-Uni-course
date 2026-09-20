@@ -1,0 +1,6 @@
+@SchemaHunter_HostAddress = http://localhost:5213
+
+GET {{SchemaHunter_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
