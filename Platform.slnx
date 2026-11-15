@@ -1,5 +1,12 @@
 <Solution>
   <Folder Name="/Services/" />
+  <Folder Name="/Services/RiskAssessments/">
+    <Project Path="Services/RiskAssessments/RiskAssessments.Application/RiskAssessments.Application.csproj" />
+    <Project Path="Services/RiskAssessments/RiskAssessments.Domain/RiskAssessments.Domain.csproj" />
+    <Project Path="Services/RiskAssessments/RiskAssessments.Infrastructure/RiskAssessments.Infrastructure.csproj" />
+    <Project Path="Services/RiskAssessments/RiskAssessments.Tests/RiskAssessments.Tests.csproj" />
+    <Project Path="Services/RiskAssessments/RiskAssessments.WebApi/RiskAssessments.WebApi.csproj" />
+  </Folder>
   <Folder Name="/Services/Tenders/">
     <Project Path="Services/Tenders/Tenders.Api/Tenders.Api.csproj" />
     <Project Path="Services/Tenders/Tenders.Bll/Tenders.Bll.csproj" />

@@ -31,7 +31,7 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── MongoDB (for Risk Notes / P3 context) ────────────────────────────────────
+  # ── MongoDB (P3 RiskAssessment). The Lab 04 service selects database RiskAssessment itself.
   mongodb:
     image: mongo:7
     container_name: procurement_mongodb

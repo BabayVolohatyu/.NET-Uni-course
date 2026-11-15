@@ -221,7 +221,7 @@ Running any script a second time produces no duplicate records.
 | **01** | All 3 | Schema design, seed scripts, stored procedures |
 | **02** (this lab) | P1 — ProcurementBidding | ADO.NET + Dapper, three-layer architecture, Aspire |
 | **03** | P2 — ContractorRegistry | EF Core Code First, Fluent API, migrations |
-| **04** | P3 — RiskAssessment | MongoDB driver, clean architecture |
+| **04** | P3 — RiskAssessment | Clean Architecture, MediatR CQRS, MongoDB |
 
 ---
 
@@ -470,3 +470,104 @@ curl "http://localhost:5002/api/contractors?page=2&pageSize=2&sortBy=capital&sor
 **FluentValidation**: Validators (`CreateContractorDtoValidator`, `UpdateContractorDtoValidator`) are registered via `AddValidatorsFromAssemblyContaining<>` and called explicitly in controllers — no deprecated `AddFluentValidation` middleware.
 
 **Serilog SQL logging**: `MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Information)` enables EF Core SQL query logging — verify that Eager Loading logs 1 query and Explicit Loading logs 2.
+
+---
+
+## Lab 04 — Risk Assessments (Clean Architecture + CQRS + MongoDB)
+
+Project №3 from Lab 01, now a microservice. Database `RiskAssessment`. Collections stay `riskAssessments`, `auditNotes`, `anomalyRules`, and `discussions`.
+
+### Layer diagram
+
+Dependencies point inward. `RiskAssessments.Domain` references no other project and does not reference `MongoDB.Driver`.
+
+```
+RiskAssessments.WebApi          controllers, Swagger, ProblemDetails, Serilog
+        │  references
+        ├── RiskAssessments.Application     commands, queries, validators, behaviors
+        │         │  references
+        │         └── RiskAssessments.Domain    entities, value objects, repository ports
+        └── RiskAssessments.Infrastructure  MongoDbContext, BsonClassMap, repositories, seed, indexes
+                  │  references
+                  ├── RiskAssessments.Application
+                  └── RiskAssessments.Domain
+```
+
+| Layer | Project | Responsibility |
+|-------|---------|----------------|
+| Domain | `Services/RiskAssessments/RiskAssessments.Domain` | `RiskAssessment`, `TriggeredFlag`, `AuditNote`; value objects `Auditor`, `Money`, `Attachment`; `IRiskAssessmentRepository` |
+| Application | `RiskAssessments.Application` | MediatR commands/queries, FluentValidation, `IRiskAssessmentQueries`, pipeline behaviors |
+| Infrastructure | `RiskAssessments.Infrastructure` | MongoDB driver, camelCase `BsonClassMap`, optimistic version check, idempotent seed, indexes |
+| Presentation | `RiskAssessments.WebApi` | Controllers talk only to `ISender`. AutoMapper maps `ObjectId` → `string` |
+
+### Document model (same as Lab 01)
+
+| Collection | Shape |
+|------------|--------|
+| `riskAssessments` | One document per tender. Embedded `triggeredFlags[]`. Referenced `auditNoteIds[]`. Snapshots `tenderTitle`, `procuringEntityName`. |
+| `auditNotes` | Hybrid: embedded `smallAttachments[]`, optional `discussionId`. |
+| `anomalyRules` | Flexible schema. `PRICE_DUMPING` has `maxPriceRatioPct`; `SHELL_COMPANY` has `maxCompanyAgeDays` and `maxAuthorizedCapital`; `SINGLE_BIDDER` has neither. |
+| `discussions` | Referenced from a long note. Messages embedded. |
+
+`version` is the optimistic-concurrency token. `GET` returns it as `ETag`. `PUT` and `DELETE` send it as `If-Match`.
+
+Score bands: Low 0–29, Medium 30–54, High 55–79, Critical 80–100.
+
+### Quickstart
+
+```powershell
+docker compose up -d mongodb
+dotnet run --project Services\RiskAssessments\RiskAssessments.WebApi
+```
+
+Swagger: http://localhost:5004/swagger  
+Health: http://localhost:5004/health  
+
+Startup creates indexes and, outside Production, seeds only when a collection is empty. A second start does not insert duplicates.
+
+`appsettings.json` / `appsettings.Development.json` use database `RiskAssessment`. Staging uses `RiskAssessmentStaging`. Production uses `RiskAssessmentProd`.
+
+### API
+
+| Method | URL | Success | Error |
+|--------|-----|---------|-------|
+| `GET` | `/api/risk-assessments?procuringEntityId=&riskLevel=&page=&pageSize=` | 200 | 400 |
+| `GET` | `/api/risk-assessments/cursor?afterId=&pageSize=` | 200 | 400 |
+| `GET` | `/api/risk-assessments/search?text=` | 200 | 400 |
+| `GET` | `/api/risk-assessments/{id}` | 200 + `ETag` | 400, 404 |
+| `POST` | `/api/risk-assessments` | 201 + `Location` with a string ObjectId | 400, 409 |
+| `PUT` | `/api/risk-assessments/{id}` + `If-Match` | 200 | 400, 404, 409 |
+| `DELETE` | `/api/risk-assessments/{id}` + `If-Match` | 204 | 400, 404, 409 |
+| `POST` | `/api/risk-assessments/{id}/flags` + `If-Match` | 200 | 400, 404, 409 |
+| `GET` | `/api/risk-assessments/{id}/notes` | 200 | 400 |
+| `POST` | `/api/risk-assessments/{id}/notes` | 201 | 400, 404, 409 |
+
+### Self-check
+
+```powershell
+# Score 120 is rejected by FluentValidation before the handler.
+# The log line is: Validation failed for CreateRiskAssessmentCommand; handler was not invoked
+curl -X POST http://localhost:5004/api/risk-assessments `
+  -H "Content-Type: application/json" `
+  -d '{"tenderId":9,"tenderTitle":"Міст","procuringEntityId":1,"procuringEntityName":"ОДА","auditorId":"a-1","auditorName":"Олег","overallRiskScore":120,"riskLevel":"Critical"}'
+
+# Second assessment for tender 2 (already seeded) → 400 from the async validator, or 409 if the unique index wins
+curl -X POST http://localhost:5004/api/risk-assessments `
+  -H "Content-Type: application/json" `
+  -d '{"tenderId":2,"tenderTitle":"Дубль","procuringEntityId":2,"procuringEntityName":"ОДА","auditorId":"a-1","auditorName":"Олег","overallRiskScore":40,"riskLevel":"Medium"}'
+
+# Unknown id → 404. Garbage id → 400 (ObjectId rule).
+curl http://localhost:5004/api/risk-assessments/507f1f77bcf86cd799439011
+curl http://localhost:5004/api/risk-assessments/not-an-id
+
+# Indexes (mongosh or Compass)
+mongosh mongodb://localhost:27017/RiskAssessment --eval "db.riskAssessments.getIndexes()"
+```
+
+### Tests
+
+```powershell
+dotnet test Services\RiskAssessments\RiskAssessments.Tests
+```
+
+Covers a score of 120 (no database), value-object equality, and a BSON round-trip: camelCase, embedded `triggeredFlags`, no leaked `_triggeredFlags` field.
