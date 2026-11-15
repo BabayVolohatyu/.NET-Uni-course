@@ -218,7 +218,147 @@ Running any script a second time produces no duplicate records.
 
 | Lab | Context | Focus |
 |-----|---------|-------|
-| **01** (this lab) | All 3 | Schema design, seed scripts, stored procedures |
-| **02** | P1 — ProcurementBidding | ADO.NET + Dapper, three-layer architecture |
+| **01** | All 3 | Schema design, seed scripts, stored procedures |
+| **02** (this lab) | P1 — ProcurementBidding | ADO.NET + Dapper, three-layer architecture, Aspire |
 | **03** | P2 — ContractorRegistry | EF Core Code First, Fluent API, migrations |
 | **04** | P3 — RiskAssessment | MongoDB driver, clean architecture |
+
+---
+
+## Lab 02 — Tenders Microservice (ADO.NET + Dapper)
+
+### Solution structure
+
+```
+Platform.slnx                     ← solution file
+Platform.AppHost/                  ← .NET Aspire orchestration (single-command launch)
+Services/
+└── Tenders/                       ← P1 Microservice — Bidding/Procurement context
+    ├── Tenders.Api/               ← Controllers, Program.cs, Swagger, ProblemDetails middleware
+    ├── Tenders.Bll/               ← Services, DTOs, AutoMapper profiles, business rules
+    ├── Tenders.Dal/               ← Repositories (ADO.NET + Dapper), UnitOfWork, interfaces
+    └── Tenders.Domain/            ← Domain models, exceptions (NotFoundException, etc.), constants
+```
+
+Dependency direction: `Api → Bll → Dal`; `Domain` is shared by both `Dal` and `Bll`.
+Controllers never touch repositories directly — only through service interfaces.
+
+### Quickstart — Option A: via .NET Aspire (recommended)
+
+Aspire launches the API and connects it to an existing ProcurementBidding SQL Server in one command.
+
+**Prerequisites:**
+- Docker Desktop running (SQL Server container from Lab 01)
+- .NET 10 SDK
+
+```powershell
+# 1. Start SQL Server and apply Lab 01 scripts (if not already done)
+docker compose up -d
+# wait ~15 seconds for SQL Server to start
+
+docker cp db\p1\schema.sql     sqlserver:/tmp/schema.sql
+docker cp db\p1\procedures.sql sqlserver:/tmp/procedures.sql
+docker cp db\p1\seed.sql       sqlserver:/tmp/seed.sql
+docker exec -it sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P "YourStrong!Passw0rd" -No -i /tmp/schema.sql
+docker exec -it sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P "YourStrong!Passw0rd" -No -i /tmp/procedures.sql
+docker exec -it sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P "YourStrong!Passw0rd" -No -i /tmp/seed.sql
+
+# 2. Launch via Aspire (starts API + injects DB connection string automatically)
+dotnet run --project Platform.AppHost
+```
+
+Open the Aspire Dashboard URL printed in the console (typically `http://localhost:15888`).  
+Click the `tenders-api` row → open the API endpoint → navigate to `/swagger`.
+
+### Quickstart — Option B: direct API launch (without Aspire)
+
+```powershell
+# 1. Start SQL Server and apply scripts (same as above)
+
+# 2. Run the API directly
+dotnet run --project Services\Tenders\Tenders.Api
+
+# Open Swagger
+start http://localhost:5000/swagger
+```
+
+### API endpoints summary
+
+| Method | URL | Description | Success | Error |
+|--------|-----|-------------|---------|-------|
+| `GET` | `/api/procuring-entities` | List all procuring entities | 200 | — |
+| `GET` | `/api/procuring-entities/{id}` | Get entity by ID | 200 | 404 |
+| `POST` | `/api/procuring-entities` | Create procuring entity | 201 | 400, 409 |
+| `GET` | `/api/tenders/{id}` | Get tender with details | 200 | 404 |
+| `GET` | `/api/tenders/by-entity/{id}?status=Draft` | Tenders for an entity | 200 | — |
+| `POST` | `/api/tenders` | Create tender (Draft status) | 201 | 400, 404 |
+| `POST` | `/api/tenders/{id}/change-status` | Change tender status | 204 | 400, 404, 409 |
+| `GET` | `/api/tenders/{id}/status-history` | Status audit log | 200 | — |
+| `GET` | `/api/tenders/{id}/bids` | List bids for a tender | 200 | — |
+| `POST` | `/api/tenders/{id}/bids` | Submit a bid | 201 | 400, 404, 409 |
+| `POST` | `/api/tenders/{id}/bids/award` | Award tender to winner | 204 | 400, 404, 409 |
+
+### Sample curl requests
+
+```bash
+# Create a procuring entity
+curl -X POST http://localhost:5000/api/procuring-entities \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Kyiv City Council","edrpou":"12345678","region":"Kyiv","contactEmail":"tender@kyivcity.gov.ua"}'
+
+# Create a tender (use the returned entity Id)
+curl -X POST http://localhost:5000/api/tenders \
+  -H "Content-Type: application/json" \
+  -d '{"procuringEntityId":1,"title":"Road repair Khreshchatyk 2024","expectedBudget":5000000,"description":"Full road surface repair","deliveryAddress":"Kyiv, Khreshchatyk St 1"}'
+
+# Advance tender to Published
+curl -X POST http://localhost:5000/api/tenders/1/change-status \
+  -H "Content-Type: application/json" \
+  -d '{"newStatus":"Published","reason":"Approved by committee"}'
+
+# Submit a bid (contractor must exist in Contractors table)
+curl -X POST http://localhost:5000/api/tenders/1/bids \
+  -H "Content-Type: application/json" \
+  -d '{"contractorId":1,"proposedPrice":4800000,"priceReductionPct":4}'
+
+# Try invalid transition — returns 409 ProblemDetails
+curl -X POST http://localhost:5000/api/tenders/1/change-status \
+  -H "Content-Type: application/json" \
+  -d '{"newStatus":"Awarded"}'
+
+# Try non-existent tender — returns 404 ProblemDetails
+curl http://localhost:5000/api/tenders/99999
+```
+
+### Validation self-check
+
+```powershell
+# 1. Special character in name (SQL injection prevention)
+curl -X POST http://localhost:5000/api/procuring-entities `
+  -H "Content-Type: application/json" `
+  -d '{"name":"O'\''Brien Infrastructure","edrpou":"99887766","region":"Lviv"}'
+# Should succeed — O'Brien is handled correctly via parameterized SQL
+
+# 2. Invalid status transition — 409 ProblemDetails
+curl -X POST http://localhost:5000/api/tenders/1/change-status `
+  -H "Content-Type: application/json" `
+  -d '{"newStatus":"Awarded"}'
+# Returns: 409 Conflict with ProblemDetails.detail = "Invalid status transition..."
+
+# 3. Non-existent ID — 404 ProblemDetails
+curl http://localhost:5000/api/tenders/999999
+# Returns: 404 Not Found with ProblemDetails, NOT 500
+
+# 4. Award tender (transactional — rolls back both bid+status if it fails)
+curl -X POST http://localhost:5000/api/tenders/1/bids/award `
+  -H "Content-Type: application/json" `
+  -d '{"winnerContractorId":1}'
+```
+
+### Architecture decisions
+
+**Isolation level:** `ReadCommitted` for all transactions. Prevents dirty reads while keeping lock contention low. `WITH (UPDLOCK)` in stored procedures guards against race conditions on the same tender row.
+
+**Connection pooling:** SqlClient connection pooling is enabled by default. `UnitOfWork.DisposeAsync()` returns the connection to the pool rather than physically closing it.
+
+**Duplication policy:** See the table in the main section above. `Bids.ContractorName` and `Bids.ContractorEDRPOU` are immutable snapshots — never updated after submission (same pattern as `OrderItem.ProductName` in Microsoft eShop).

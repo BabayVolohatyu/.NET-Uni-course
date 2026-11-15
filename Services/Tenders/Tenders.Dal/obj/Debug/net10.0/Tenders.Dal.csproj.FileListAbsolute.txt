@@ -1,0 +1,16 @@
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\bin\Debug\net10.0\Tenders.Dal.deps.json
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\bin\Debug\net10.0\Tenders.Dal.dll
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\bin\Debug\net10.0\Tenders.Dal.pdb
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\bin\Debug\net10.0\Tenders.Domain.dll
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\bin\Debug\net10.0\Tenders.Domain.pdb
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.csproj.AssemblyReference.cache
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.AssemblyInfoInputs.cache
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.AssemblyInfo.cs
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.csproj.CoreCompileInputs.cache
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.sourcelink.json
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders..8BF568C9.Up2Date
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.dll
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\refint\Tenders.Dal.dll
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\Tenders.Dal.pdb
+C:\Users\babay\myrepos\.NET-Uni-course\Services\Tenders\Tenders.Dal\obj\Debug\net10.0\ref\Tenders.Dal.dll
