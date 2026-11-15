@@ -1,0 +1,6 @@
+# Local-only: never submit to course platform
+CONTEXT.MD
+CONTEXT.md
+lab-desc/
+.guidelines/
+MASTER_PROMPT.md
