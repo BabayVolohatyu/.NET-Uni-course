@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+option csharp_namespace = "RiskAssessments.Grpc";
+package riskassessments;
+
+// Internal gRPC API for the RiskAssessments microservice.
+// Used by Platform.Aggregator for high-performance parallel calls over HTTP/2.
+// Field numbers are immutable — changing them breaks binary compatibility with existing clients.
+service RiskAssessmentsService {
+  // Retrieve a single risk assessment by its MongoDB document ID.
+  rpc GetRiskAssessment (GetRiskAssessmentRequest) returns (RiskAssessmentReply);
+
+  // Retrieve all risk assessments for a specific tender (by tender ID string).
+  rpc GetRiskAssessmentsByTender (GetByTenderRequest) returns (RiskAssessmentsReply);
+
+  // Retrieve a paged list of risk assessments.
+  rpc GetRiskAssessments (GetRiskAssessmentsRequest) returns (RiskAssessmentsReply);
+}
+
+// Request to fetch a single assessment by MongoDB ObjectId string.
+message GetRiskAssessmentRequest {
+  string id = 1; // MongoDB ObjectId as string
+}
+
+// Request to fetch assessments for a tender.
+message GetByTenderRequest {
+  string tender_id = 1; // Tender identifier (numeric ID as string)
+}
+
+// Request to list assessments with pagination.
+message GetRiskAssessmentsRequest {
+  int32 page      = 1; // 1-based page number
+  int32 page_size = 2; // items per page; default 20
+}
+
+// Single risk assessment data transfer object for gRPC responses.
+message RiskAssessmentReply {
+  string id                   = 1;  // MongoDB ObjectId
+  int64  tender_id            = 2;
+  string tender_title         = 3;
+  int64  procuring_entity_id  = 4;
+  string procuring_entity_name = 5;
+  string auditor_name         = 6;
+  double overall_risk_score   = 7;
+  string risk_level           = 8;  // Low / Medium / High / Critical
+  int32  flags_count          = 9;
+  int32  version              = 10;
+  string created_at           = 11; // ISO 8601 datetime string
+}
+
+// Collection of risk assessments.
+message RiskAssessmentsReply {
+  repeated RiskAssessmentReply assessments = 1;
+}

@@ -13,6 +13,8 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageReference Include="MongoDB.Bson" Version="3.14.0" />
+    <!-- Lab 06: caching (IMemoryCache, IDistributedCache) -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.8" />
   </ItemGroup>
 
   <PropertyGroup>

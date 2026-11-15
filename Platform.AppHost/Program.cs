@@ -23,30 +23,37 @@ var mongo = builder.AddMongoDB("mongo")
 
 var riskAssessmentDb = mongo.AddDatabase("RiskAssessmentDb"); // Lab 04 — RiskAssessments.WebApi (MongoDB)
 
-// ── Microservices (Labs 02–04) ────────────────────────────────────────────────
+// ── Redis container (Lab 06) ──────────────────────────────────────────────────
+// Provides distributed caching (L2) shared across all service replicas.
+// Aspire automatically injects ConnectionStrings:redis into every service that has WithReference(redis).
+// WithDataVolume ensures cached entries survive container restarts (persist to Docker volume).
+var redis = builder.AddRedis("redis")
+    .WithDataVolume("procurement-redis-data");
+
+// ── Microservices (Labs 02–04, extended in Lab 06 with Redis) ─────────────────
 // WithReference injects the connection string; WaitFor ensures the DB is ready first.
+// Lab 06: each service also receives a Redis reference for distributed caching.
 var tenders = builder.AddProject<Projects.Tenders_Api>("tenders-api")
-    .WithReference(procurementDb)
-    .WaitFor(procurementDb);
+    .WithReference(procurementDb).WaitFor(procurementDb)
+    .WithReference(redis).WaitFor(redis);
 
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
-    .WithReference(contractorDb)
-    .WaitFor(contractorDb);
+    .WithReference(contractorDb).WaitFor(contractorDb)
+    .WithReference(redis).WaitFor(redis);
 
 var riskAssessments = builder.AddProject<Projects.RiskAssessments_WebApi>("risk-assessments-api")
-    .WithReference(riskAssessmentDb)
-    .WaitFor(riskAssessmentDb);
+    .WithReference(riskAssessmentDb).WaitFor(riskAssessmentDb)
+    .WithReference(redis).WaitFor(redis);
 
-// ── Aggregator ────────────────────────────────────────────────────────────────
+// ── Aggregator (Lab 06: Redis for caching aggregated responses) ───────────────
 // Receives references to all three microservices (for service discovery).
 // WaitFor ensures services are ready before Aggregator starts calling them.
+// gRPC clients replace HTTP clients for microservice-to-microservice communication.
 var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
-    .WithReference(tenders)
-    .WithReference(catalog)
-    .WithReference(riskAssessments)
-    .WaitFor(tenders)
-    .WaitFor(catalog)
-    .WaitFor(riskAssessments);
+    .WithReference(tenders).WaitFor(tenders)
+    .WithReference(catalog).WaitFor(catalog)
+    .WithReference(riskAssessments).WaitFor(riskAssessments)
+    .WithReference(redis).WaitFor(redis);
 
 // ── API Gateway (YARP) ────────────────────────────────────────────────────────
 // Fixed port 5000 for convenient development — clients always connect to localhost:5000.

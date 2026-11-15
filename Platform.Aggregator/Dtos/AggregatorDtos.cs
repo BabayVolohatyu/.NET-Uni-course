@@ -25,13 +25,13 @@ public record ContractorSummaryDto(
     string? Region);
 
 // ── Risk assessment summary (from RiskAssessments.WebApi) ────────────────────
-/// <summary>Summarized risk assessment fetched from RiskAssessments.WebApi.</summary>
+/// <summary>Summarized risk assessment fetched from RiskAssessments.WebApi (gRPC in Lab 06).</summary>
 public record RiskAssessmentSummaryDto(
     string Id,
     string TenderId,
     string TenderTitle,
     string RiskLevel,
-    int OverallRiskScore,
+    int FlagsCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? TriggeredFlags);
 

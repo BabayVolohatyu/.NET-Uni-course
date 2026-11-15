@@ -1,12 +1,20 @@
+using Catalog.Grpc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
-using Platform.Aggregator.Clients;
+using Platform.Aggregator.Caching;
+using RiskAssessments.Grpc;
 using System.Text.Json.Serialization;
+using Tenders.Grpc;
 
 // ── Platform.Aggregator — Aggregator Pattern implementation ───────────────────
 // Receives composite requests → queries multiple microservices in parallel (Task.WhenAll)
 // → assembles a single response with partial-failure tolerance (Warnings list).
 //
-// Registered in AppHost as "aggregator"; accessible to Gateway as http://aggregator.
+// Lab 06 upgrade:
+//   • HTTP typed clients replaced by gRPC clients (lower latency, multiplexed HTTP/2)
+//   • Redis distributed cache added for aggregated responses (short TTL = 30 s)
+//   • Cache checked BEFORE parallel gRPC calls; partial results not cached
+//   • CorrelationId propagated via gRPC metadata headers
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,18 +22,26 @@ var builder = WebApplication.CreateBuilder(args);
 // service discovery, resilient HttpClient (all from ServiceDefaults)
 builder.AddServiceDefaults();
 
-// ── Typed HTTP clients ────────────────────────────────────────────────────────
-// BaseAddress uses "https+http://<service-name>" — Aspire service discovery resolves
-// the logical name to the real address (assigned dynamically by AppHost).
-// CorrelationIdHandler is auto-added to all clients via ServiceDefaults.ConfigureHttpClientDefaults.
-builder.Services.AddHttpClient<TendersClient>(
-    c => c.BaseAddress = new Uri("https+http://tenders-api"));
+// ── Lab 06: Redis distributed cache (Aspire integration) ─────────────────────
+// Aspire injects ConnectionStrings:redis via WithReference(redis) in AppHost.
+builder.AddRedisDistributedCache("redis");
 
-builder.Services.AddHttpClient<ContractorsClient>(
-    c => c.BaseAddress = new Uri("https+http://catalog-api"));
+// ── Lab 06: Aggregator cache metrics ─────────────────────────────────────────
+builder.Services.AddSingleton<AggregatorCacheMetrics>();
 
-builder.Services.AddHttpClient<RiskAssessmentsClient>(
-    c => c.BaseAddress = new Uri("https+http://risk-assessments-api"));
+// ── Lab 06: gRPC clients ──────────────────────────────────────────────────────
+// AddGrpcClient uses the same HttpClient factory as the previous HTTP clients.
+// Service discovery resolves "https+http://<service-name>" to the actual address.
+// CorrelationIdHandler (registered in ServiceDefaults.ConfigureHttpClientDefaults)
+// adds X-Correlation-Id to outgoing gRPC metadata automatically.
+builder.Services.AddGrpcClient<TendersService.TendersServiceClient>(o =>
+    o.Address = new Uri("https+http://tenders-api"));
+
+builder.Services.AddGrpcClient<ContractorService.ContractorServiceClient>(o =>
+    o.Address = new Uri("https+http://catalog-api"));
+
+builder.Services.AddGrpcClient<RiskAssessmentsService.RiskAssessmentsServiceClient>(o =>
+    o.Address = new Uri("https+http://risk-assessments-api"));
 
 // ── Controllers ───────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -42,7 +58,8 @@ builder.Services.AddSwaggerGen(c =>
         Title       = "Procurement Risk Platform — Aggregator",
         Version     = "v1",
         Description = "Aggregates data from Tenders.Api, Catalog.Api, and RiskAssessments.WebApi. " +
-                      "Implements the Aggregator Pattern with partial failure tolerance."
+                      "Lab 06: microservice calls now use gRPC (HTTP/2) for lower latency. " +
+                      "Aggregated responses are cached in Redis (30 s TTL)."
     });
 });
 

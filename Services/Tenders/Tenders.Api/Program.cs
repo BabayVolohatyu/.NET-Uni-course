@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Hosting;
 using Serilog;
+using Tenders.Api.Grpc;
 using Tenders.Api.Middleware;
+using Tenders.Bll.Caching;
 using Tenders.Bll.Interfaces;
 using Tenders.Bll.Mapping;
 using Tenders.Bll.Services;
@@ -17,6 +19,19 @@ var builder = WebApplication.CreateBuilder(args);
 // ⚠️ Must come before any other configuration that depends on ILogger.
 builder.AddServiceDefaults();
 
+// ── Lab 06: Local in-memory caching ──────────────────────────────────────────
+// SizeLimit=10_000 prevents unbounded memory growth.
+// Each cache entry has Size=1 set in the caching service.
+builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);
+
+// ── Lab 06: Distributed Redis cache (Aspire integration) ─────────────────────
+// Aspire injects ConnectionStrings:redis automatically via WithReference(redis).
+// No need to set the address manually in appsettings.
+builder.AddRedisDistributedCache("redis");
+
+// ── Lab 06: Cache metrics (OpenTelemetry custom counters) ─────────────────────
+builder.Services.AddSingleton<CacheMetrics>();
+
 // ── Connection string ──────────────────────────────────────────────────────────
 // When running under Aspire (AppHost), Aspire injects ConnectionStrings:ProcurementBidding
 // automatically via environment variable. The appsettings.json value is a fallback for
@@ -31,7 +46,15 @@ var connectionString = builder.Configuration.GetConnectionString("ProcurementBid
 builder.Services.AddScoped<IUnitOfWork>(_ => new UnitOfWork(connectionString));
 
 // BLL services: Scoped (they depend on IUnitOfWork which is Scoped)
-builder.Services.AddScoped<ITenderService, TenderService>();
+// Lab 06: TenderCacheService decorates TenderService with two-level caching.
+// Factory registration ensures the decorator receives the concrete TenderService, not itself.
+builder.Services.AddScoped<TenderService>();
+builder.Services.AddScoped<ITenderService>(sp => new TenderCacheService(
+    sp.GetRequiredService<TenderService>(),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+    sp.GetRequiredService<ILogger<TenderCacheService>>(),
+    sp.GetRequiredService<CacheMetrics>()));
 builder.Services.AddScoped<IBidService, BidService>();
 
 // AutoMapper: profiles are defined centrally in BLL (not in Api)
@@ -41,6 +64,11 @@ builder.Services.AddAutoMapper(cfg =>
     cfg.AddProfile<TenderProfile>();
     cfg.AddProfile<BidProfile>();
 });
+
+// ── Lab 06: gRPC server ───────────────────────────────────────────────────────
+// AddGrpc must be called before AddControllers.
+// LoggingInterceptor (in Tenders.Api.Grpc) logs every RPC call with method, peer, status, elapsed.
+builder.Services.AddGrpc(o => o.Interceptors.Add<Tenders.Api.Grpc.LoggingInterceptor>());
 
 // ── Controllers ────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -87,6 +115,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.MapControllers();
+
+// ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────
+// gRPC runs over HTTP/2 (ALPN-negotiated when HTTPS is active).
+// MapGrpcService must come after UseRouting (implicit in .NET 8+).
+app.MapGrpcService<TendersGrpcService>();
 
 // ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
 // These are consumed by Aspire Dashboard to display service readiness status.

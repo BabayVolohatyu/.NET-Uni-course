@@ -1,11 +1,14 @@
 using Microsoft.Extensions.Hosting;
 using RiskAssessments.Application;
+using RiskAssessments.Application.Caching;
+using RiskAssessments.Application.Common.Interfaces;
 using RiskAssessments.Application.Mapping;
 using RiskAssessments.Infrastructure;
 using RiskAssessments.Infrastructure.Indexing;
 using RiskAssessments.Infrastructure.Persistence;
 using RiskAssessments.Infrastructure.Seeding;
 using RiskAssessments.WebApi.ExceptionHandling;
+using RiskAssessments.WebApi.Grpc;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,9 +19,35 @@ var builder = WebApplication.CreateBuilder(args);
 // CorrelationId, health checks, service discovery, and resilient HttpClient defaults.
 builder.AddServiceDefaults();
 
+// ── Lab 06: Local in-memory caching ──────────────────────────────────────────
+builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);
+
+// ── Lab 06: Distributed Redis cache (Aspire integration) ─────────────────────
+builder.AddRedisDistributedCache("redis");
+
+// ── Lab 06: Cache metrics (OpenTelemetry custom counters) ─────────────────────
+builder.Services.AddSingleton<CacheMetrics>();
+
 builder.Services
     .AddApplication(builder.Configuration)
     .AddInfrastructure(builder.Configuration);
+
+// ── Lab 06: Wrap IRiskAssessmentQueries with two-level cache decorator ─────────
+// Infrastructure registers RiskAssessmentQueries → IRiskAssessmentQueries.
+// We replace that binding with the cache decorator by removing the original
+// and re-registering via factory. The concrete type is also registered so the
+// decorator can receive it via DI.
+builder.Services.AddScoped<RiskAssessments.Infrastructure.Persistence.RiskAssessmentQueries>();
+var raqDescriptor = builder.Services
+    .LastOrDefault(d => d.ServiceType == typeof(IRiskAssessmentQueries)
+                     && d.ImplementationType == typeof(RiskAssessments.Infrastructure.Persistence.RiskAssessmentQueries));
+if (raqDescriptor is not null) builder.Services.Remove(raqDescriptor);
+builder.Services.AddScoped<IRiskAssessmentQueries>(sp => new RiskAssessmentCacheService(
+    sp.GetRequiredService<RiskAssessments.Infrastructure.Persistence.RiskAssessmentQueries>(),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+    sp.GetRequiredService<ILogger<RiskAssessmentCacheService>>(),
+    sp.GetRequiredService<CacheMetrics>()));
 
 builder.Services.AddAutoMapper(cfg =>
 {
@@ -46,6 +75,9 @@ builder.Services.AddProblemDetails(o =>
         ctx.ProblemDetails.Extensions["instance"] = ctx.HttpContext.Request.Path.Value;
     });
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+// ── Lab 06: gRPC server ───────────────────────────────────────────────────────
+builder.Services.AddGrpc(o => o.Interceptors.Add<RiskAssessments.WebApi.Grpc.LoggingInterceptor>());
 
 builder.Services.AddHealthChecks()
     .AddMongoDb(
@@ -86,6 +118,9 @@ if (!app.Environment.IsProduction())
 }
 
 app.MapControllers();
+
+// ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────
+app.MapGrpcService<RiskAssessmentsGrpcService>();
 
 // ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
 // MapDefaultEndpoints provides /health (full readiness) and /alive (liveness).

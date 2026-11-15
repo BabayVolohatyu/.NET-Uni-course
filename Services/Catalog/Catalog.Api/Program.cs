@@ -1,4 +1,6 @@
+using Catalog.Api.Grpc;
 using Catalog.Api.Middleware;
+using Catalog.Bll.Caching;
 using Catalog.Bll.Interfaces;
 using Catalog.Bll.MappingProfiles;
 using Catalog.Bll.Services;
@@ -21,6 +23,17 @@ var builder = WebApplication.CreateBuilder(args);
 // CorrelationId, health checks, service discovery, and resilient HttpClient defaults.
 builder.AddServiceDefaults();
 
+// ── Lab 06: Local in-memory caching ──────────────────────────────────────────
+// SizeLimit=10_000 prevents unbounded memory growth (units = cache entry Size values).
+builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);
+
+// ── Lab 06: Distributed Redis cache (Aspire integration) ─────────────────────
+// Aspire injects ConnectionStrings:redis automatically via WithReference(redis).
+builder.AddRedisDistributedCache("redis");
+
+// ── Lab 06: Cache metrics (OpenTelemetry custom counters) ─────────────────────
+builder.Services.AddSingleton<CacheMetrics>();
+
 // ── Database: EF Core + SQL Server ────────────────────────────────────────────
 // When running under Aspire (AppHost), Aspire injects ConnectionStrings:ContractorRegistry
 // automatically via environment variable. The appsettings.json value is a fallback.
@@ -37,7 +50,14 @@ builder.Services.AddDbContext<CatalogDbContext>(o =>
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 // ── BLL services ───────────────────────────────────────────────────────────────
-builder.Services.AddScoped<IContractorService, ContractorService>();
+// Lab 06: ContractorCacheService decorates ContractorService with two-level caching.
+builder.Services.AddScoped<ContractorService>();
+builder.Services.AddScoped<IContractorService>(sp => new ContractorCacheService(
+    sp.GetRequiredService<ContractorService>(),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+    sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+    sp.GetRequiredService<ILogger<ContractorCacheService>>(),
+    sp.GetRequiredService<CacheMetrics>()));
 builder.Services.AddScoped<IWorkCategoryService, WorkCategoryService>();
 
 // ── AutoMapper ─────────────────────────────────────────────────────────────────
@@ -51,6 +71,9 @@ builder.Services.AddAutoMapper(cfg =>
 // Validators are injected into controllers via [FromServices] and called explicitly —
 // NOT via the deprecated AddFluentValidation middleware
 builder.Services.AddValidatorsFromAssemblyContaining<CreateContractorDtoValidator>();
+
+// ── Lab 06: gRPC server ───────────────────────────────────────────────────────
+builder.Services.AddGrpc(o => o.Interceptors.Add<Catalog.Api.Grpc.LoggingInterceptor>());
 
 // ── Controllers ────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -112,6 +135,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.MapControllers();
+
+// ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────
+app.MapGrpcService<ContractorsGrpcService>();
 
 // ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
 app.MapDefaultEndpoints();

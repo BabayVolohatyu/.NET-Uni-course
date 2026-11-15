@@ -1,37 +1,56 @@
+using Catalog.Grpc;
+using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
-using Platform.Aggregator.Clients;
+using Microsoft.Extensions.Caching.Distributed;
+using Platform.Aggregator.Caching;
 using Platform.Aggregator.Dtos;
+using RiskAssessments.Grpc;
 using System.Diagnostics;
+using System.Text.Json;
+using Tenders.Grpc;
+using GrpcStatus = Grpc.Core.StatusCode;
 
 namespace Platform.Aggregator.Controllers;
 
 /// <summary>
 /// Aggregator endpoints — combine data from multiple microservices in a single response.
 ///
-/// Pattern: Aggregator receives a request → fires parallel calls to Tenders.Api,
-/// Catalog.Api, and RiskAssessments.WebApi via Task.WhenAll → assembles FullTenderDto.
-///
-/// Partial failures: if one downstream service is unavailable, the response still returns
-/// data from the available services plus a Warnings list — HTTP 200, not 500.
+/// Lab 06 upgrade:
+///   • HTTP REST calls replaced by gRPC calls over HTTP/2 (lower latency, multiplexed).
+///   • Parallel gRPC calls via Task.WhenAll — same pattern as before.
+///   • RpcException (Unavailable / DeadlineExceeded) → Warnings, not 500.
+///   • Aggregated responses cached in Redis with 30 s TTL.
+///   • Cache checked BEFORE gRPC calls; partial responses are NOT cached.
 /// </summary>
 [ApiController]
 [Route("api/aggregator")]
 [Produces("application/json")]
 public class AggregatorController(
-    TendersClient tendersClient,
-    ContractorsClient contractorsClient,
-    RiskAssessmentsClient riskAssessmentsClient,
+    TendersService.TendersServiceClient tendersClient,
+    ContractorService.ContractorServiceClient contractorClient,
+    RiskAssessmentsService.RiskAssessmentsServiceClient riskClient,
+    IDistributedCache cache,
+    AggregatorCacheMetrics cacheMetrics,
     ILogger<AggregatorController> logger) : ControllerBase
 {
     // ActivitySource for custom business spans — visible in Aspire Dashboard "Traces"
     private static readonly ActivitySource Source = new("Platform.Aggregator");
 
+    // Aggregated response TTL — shorter than individual service cache TTLs
+    // to avoid serving stale aggregated data that looks "fresher" than its parts.
+    private static readonly DistributedCacheEntryOptions CacheOptions = new()
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
+    };
+
     /// <summary>
     /// Full tender view: tender data + participating contractors + risk assessments.
     ///
-    /// Calls Tenders.Api, Catalog.Api, and RiskAssessments.WebApi in parallel (Task.WhenAll).
-    /// If Catalog.Api or RiskAssessments.WebApi is unavailable, returns partial data with Warnings.
-    /// If Tenders.Api is unavailable, returns 404 (no tender = nothing to aggregate).
+    /// Flow:
+    ///   1. Check Redis cache → hit: return immediately (no gRPC calls needed)
+    ///   2. gRPC GetTender → not found: return 404
+    ///   3. Parallel gRPC calls for contractors and risk assessments (Task.WhenAll)
+    ///   4. Cache complete result if no warnings; partial results are never cached.
     ///
     /// Example: GET /api/aggregator/tenders/42/full
     /// </summary>
@@ -45,20 +64,60 @@ public class AggregatorController(
         using var activity = Source.StartActivity("AggregateFullTender");
         activity?.SetTag("tender.id", tenderId);
 
-        logger.LogInformation(
-            "Aggregating full tender view for TenderId={TenderId}", tenderId);
+        logger.LogInformation("Aggregating full tender view for TenderId={TenderId}", tenderId);
+
+        var cacheKey = $"aggregator:tender:{tenderId}:full";
+
+        // ── Step 0: Check Redis cache ──────────────────────────────────────────
+        try
+        {
+            var cached = await cache.GetAsync(cacheKey, cancellationToken);
+            if (cached is not null)
+            {
+                var cachedDto = JsonSerializer.Deserialize<FullTenderDto>(cached);
+                if (cachedDto is not null)
+                {
+                    cacheMetrics.RecordHit(cacheKey);
+                    logger.LogDebug("Aggregator cache hit for key {CacheKey}", cacheKey);
+                    activity?.SetTag("cache.hit", true);
+                    return Ok(cachedDto);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Redis unavailable for cache key {CacheKey}, proceeding without cache", cacheKey);
+        }
+
+        cacheMetrics.RecordMiss(cacheKey);
 
         var warnings = new List<string>();
 
-        // Step 1: Fetch the tender — without it there's nothing to aggregate
-        var tender = await tendersClient.GetTenderAsync(tenderId, cancellationToken);
-        if (tender is null)
+        // ── Step 1: Fetch the tender via gRPC ─────────────────────────────────
+        TenderReply? tender;
+        try
         {
-            logger.LogWarning("Tender {TenderId} not found in tenders-api", tenderId);
+            tender = await tendersClient.GetTenderAsync(
+                new GetTenderRequest { Id = tenderId },
+                cancellationToken: cancellationToken);
+        }
+        catch (RpcException ex) when (ex.StatusCode == GrpcStatus.NotFound)
+        {
+            logger.LogWarning("Tender {TenderId} not found in tenders-api (gRPC NotFound)", tenderId);
             return NotFound(new ProblemDetails
             {
-                Title = "Tender not found",
+                Title  = "Tender not found",
                 Detail = $"Tender with Id={tenderId} does not exist.",
+                Status = StatusCodes.Status404NotFound
+            });
+        }
+        catch (RpcException ex)
+        {
+            logger.LogWarning(ex, "tenders-api gRPC call failed for TenderId={TenderId}", tenderId);
+            return NotFound(new ProblemDetails
+            {
+                Title  = "Tender not found",
+                Detail = $"Could not retrieve tender Id={tenderId}: {ex.Status.Detail}",
                 Status = StatusCodes.Status404NotFound
             });
         }
@@ -66,38 +125,71 @@ public class AggregatorController(
         activity?.SetTag("tender.title", tender.Title);
         activity?.SetTag("tender.status", tender.Status);
 
-        // Step 2: Fetch contractors and risk assessments in PARALLEL (Task.WhenAll)
-        // CancellationToken is passed to all calls — if the client disconnects, all calls stop.
-        // Partial failures are caught by SafeAsync — unavailable service → warning, not 500.
-        var contractorsTask    = SafeAsync(
-            () => contractorsClient.GetContractorsAsync(cancellationToken: cancellationToken),
-            "catalog-api", warnings, cancellationToken);
+        // ── Step 2: Parallel gRPC calls for contractors and risk assessments ──
+        var contractorsTask = SafeGrpcAsync(
+            () => contractorClient.GetContractorsAsync(
+                new GetContractorsRequest { Page = 1, PageSize = 100 },
+                cancellationToken: cancellationToken).ResponseAsync,
+            "catalog-api", warnings);
 
-        var riskAssessmentsTask = SafeAsync(
-            () => riskAssessmentsClient.GetByTenderAsync(tenderId.ToString(), cancellationToken),
-            "risk-assessments-api", warnings, cancellationToken);
+        var riskTask = SafeGrpcAsync(
+            () => riskClient.GetRiskAssessmentsByTenderAsync(
+                new GetByTenderRequest { TenderId = tenderId.ToString() },
+                cancellationToken: cancellationToken).ResponseAsync,
+            "risk-assessments-api", warnings);
 
-        // ⚠️ Task.WhenAll — parallel execution (~max(t1,t2) instead of t1+t2)
-        // ⚠️ NOT Task.WaitAll or .Result — those block threads and reduce scalability
-        await Task.WhenAll(contractorsTask, riskAssessmentsTask);
+        // ⚠️ Parallel execution over HTTP/2 multiplexed channel — both calls use the same connection.
+        await Task.WhenAll(contractorsTask, riskTask);
 
-        var contractors    = await contractorsTask    ?? [];
-        var riskAssessments = await riskAssessmentsTask ?? [];
+        var contractorsReply     = await contractorsTask;
+        var riskAssessmentsReply = await riskTask;
 
-        activity?.SetTag("contractors.count", contractors.Count);
-        activity?.SetTag("risk-assessments.count", riskAssessments.Count);
+        // ── Step 3: Map to DTOs ────────────────────────────────────────────────
+        var contractorDtos = (contractorsReply?.Contractors ?? [])
+            .Select(MapContractor).ToList();
+
+        var riskDtos = (riskAssessmentsReply?.Assessments ?? [])
+            .Select(MapRiskAssessment).ToList();
+
+        activity?.SetTag("contractors.count", contractorDtos.Count);
+        activity?.SetTag("risk-assessments.count", riskDtos.Count);
         activity?.SetTag("warnings.count", warnings.Count);
 
         logger.LogInformation(
             "Aggregation complete for TenderId={TenderId}: " +
-            "Contractors={ContractorsCount} RiskAssessments={RiskAssessmentsCount} Warnings={WarningsCount}",
-            tenderId, contractors.Count, riskAssessments.Count, warnings.Count);
+            "Contractors={ContractorsCount} RiskAssessments={RiskCount} Warnings={WarningsCount}",
+            tenderId, contractorDtos.Count, riskDtos.Count, warnings.Count);
 
-        return Ok(new FullTenderDto(tender, contractors, riskAssessments, warnings));
+        var tenderSummary = MapTender(tender);
+        var result = new FullTenderDto(tenderSummary, contractorDtos, riskDtos, warnings);
+
+        // ── Step 4: Cache complete result (not partial) ───────────────────────
+        if (warnings.Count == 0)
+        {
+            try
+            {
+                await cache.SetAsync(
+                    cacheKey,
+                    JsonSerializer.SerializeToUtf8Bytes(result),
+                    CacheOptions,
+                    cancellationToken);
+                logger.LogDebug("Aggregated result cached with key {CacheKey}", cacheKey);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to cache aggregated result for key {CacheKey}", cacheKey);
+            }
+        }
+        else
+        {
+            logger.LogDebug("Partial result for TenderId={TenderId} not cached (has warnings)", tenderId);
+        }
+
+        return Ok(result);
     }
 
     /// <summary>
-    /// Platform health aggregation: checks all three microservices in parallel.
+    /// Platform health aggregation: checks all three microservices in parallel via gRPC.
     /// Returns overall status and per-service status with warnings for unavailable services.
     /// </summary>
     [HttpGet("health")]
@@ -110,23 +202,31 @@ public class AggregatorController(
         var warnings = new List<string>();
         var services = new List<ServiceHealthDto>();
 
-        // Check all services in parallel
-        var tendersHealthTask        = SafeAsync(
-            () => tendersClient.GetTenderAsync(1, cancellationToken),
-            "tenders-api", warnings, cancellationToken);
-        var contractorsHealthTask    = SafeAsync(
-            () => contractorsClient.GetContractorsAsync(cancellationToken: cancellationToken),
-            "catalog-api", warnings, cancellationToken);
-        var riskHealthTask           = SafeAsync(
-            () => riskAssessmentsClient.GetListAsync(cancellationToken: cancellationToken),
-            "risk-assessments-api", warnings, cancellationToken);
+        // Check all services in parallel via gRPC
+        var tendersHealthTask = SafeGrpcAsync(
+            () => tendersClient.GetTenderAsync(
+                new GetTenderRequest { Id = 1 },
+                cancellationToken: cancellationToken).ResponseAsync,
+            "tenders-api", warnings);
 
-        await Task.WhenAll(tendersHealthTask, contractorsHealthTask, riskHealthTask);
+        var catalogHealthTask = SafeGrpcAsync(
+            () => contractorClient.GetContractorsAsync(
+                new GetContractorsRequest { Page = 1, PageSize = 1 },
+                cancellationToken: cancellationToken).ResponseAsync,
+            "catalog-api", warnings);
+
+        var riskHealthTask = SafeGrpcAsync(
+            () => riskClient.GetRiskAssessmentsAsync(
+                new GetRiskAssessmentsRequest { Page = 1, PageSize = 1 },
+                cancellationToken: cancellationToken).ResponseAsync,
+            "risk-assessments-api", warnings);
+
+        await Task.WhenAll(tendersHealthTask, catalogHealthTask, riskHealthTask);
 
         services.Add(new ServiceHealthDto("tenders-api",
             (await tendersHealthTask) is not null ? "Healthy" : "Degraded", null));
         services.Add(new ServiceHealthDto("catalog-api",
-            (await contractorsHealthTask) is not null ? "Healthy" : "Degraded", null));
+            (await catalogHealthTask) is not null ? "Healthy" : "Degraded", null));
         services.Add(new ServiceHealthDto("risk-assessments-api",
             (await riskHealthTask) is not null ? "Healthy" : "Degraded", null));
 
@@ -137,41 +237,73 @@ public class AggregatorController(
         return Ok(new PlatformHealthDto(overallStatus, services, warnings));
     }
 
-    // ── SafeAsync helper ──────────────────────────────────────────────────────────
+    // ── SafeGrpcAsync helper ──────────────────────────────────────────────────────
     /// <summary>
-    /// Wraps an async service call to handle partial failures gracefully.
-    /// On HttpRequestException or TaskCanceledException (service unavailable / timeout):
-    ///   • logs a warning with the service name and elapsed time
+    /// Wraps a gRPC async call to handle partial failures gracefully.
+    /// On RpcException (Unavailable / DeadlineExceeded) or TaskCanceledException:
+    ///   • logs a warning with the service name and status code
     ///   • adds a warning to the shared list
     ///   • returns default (null) instead of re-throwing
-    /// This ensures one unavailable service does not break the entire aggregation.
+    /// This ensures one unavailable microservice does not break the entire aggregation.
     /// </summary>
-    private async Task<T?> SafeAsync<T>(
-        Func<Task<T?>> call,
+    private async Task<T?> SafeGrpcAsync<T>(
+        Func<Task<T>> call,
         string serviceName,
-        List<string> warnings,
-        CancellationToken ct)
+        List<string> warnings)
     {
         var sw = Stopwatch.StartNew();
         try
         {
             var result = await call();
-            logger.LogInformation("{ServiceName} responded in {ElapsedMs} ms",
+            logger.LogInformation("{ServiceName} gRPC responded in {ElapsedMs} ms",
                 serviceName, sw.ElapsedMilliseconds);
             return result;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
-                                           or OperationCanceledException)
+        catch (RpcException ex) when (
+            ex.StatusCode is GrpcStatus.Unavailable or GrpcStatus.DeadlineExceeded
+                          or GrpcStatus.Cancelled or GrpcStatus.NotFound)
         {
             logger.LogWarning(ex,
-                "{ServiceName} is unavailable after {ElapsedMs} ms",
-                serviceName, sw.ElapsedMilliseconds);
-
-            // Thread-safe addition (multiple tasks may finish around the same time)
+                "{ServiceName} gRPC call failed: {Status} after {ElapsedMs} ms",
+                serviceName, ex.StatusCode, sw.ElapsedMilliseconds);
             lock (warnings)
-                warnings.Add($"{serviceName} is unavailable: {ex.Message}");
-
+                warnings.Add($"{serviceName} is unavailable: {ex.StatusCode} — {ex.Status.Detail}");
+            return default;
+        }
+        catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException)
+        {
+            logger.LogWarning(ex, "{ServiceName} gRPC call timed out after {ElapsedMs} ms",
+                serviceName, sw.ElapsedMilliseconds);
+            lock (warnings)
+                warnings.Add($"{serviceName} timed out after {sw.ElapsedMilliseconds} ms");
             return default;
         }
     }
+
+    // ── Mapping helpers ────────────────────────────────────────────────────────
+
+    private static TenderSummaryDto MapTender(TenderReply t) => new(
+        t.Id,
+        t.Title,
+        t.Status,
+        (decimal)t.ExpectedBudget,
+        ProcuringEntityName: string.Empty,  // not carried in gRPC response (denormalized at source)
+        CategoryCode: null,
+        string.IsNullOrEmpty(t.PublishedAt) ? null : DateTime.Parse(t.PublishedAt));
+
+    private static ContractorSummaryDto MapContractor(ContractorReply c) => new(
+        c.Id,
+        c.Name,
+        c.Edrpou,
+        c.IsActive,
+        (decimal)c.AuthorizedCapital,
+        Region: null);
+
+    private static RiskAssessmentSummaryDto MapRiskAssessment(RiskAssessmentReply r) => new(
+        r.Id,
+        r.TenderId.ToString(),
+        r.TenderTitle,
+        r.RiskLevel,
+        r.FlagsCount,
+        TriggeredFlags: null);
 }

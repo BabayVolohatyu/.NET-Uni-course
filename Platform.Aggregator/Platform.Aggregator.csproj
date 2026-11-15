@@ -11,4 +11,27 @@
     <ProjectReference Include="..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lab 06: gRPC client packages -->
+    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.70.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.31.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.70.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- Lab 06: Redis distributed caching for aggregated responses -->
+    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="9.3.0" />
+    <!-- Swagger/OpenAPI for the Aggregator -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="11.0.1" />
+  </ItemGroup>
+
+  <!-- Lab 06: gRPC client code generation from each microservice's .proto files.
+       The same .proto files are used by both server (GrpcServices="Server" in service csproj)
+       and client (GrpcServices="Client" here) to ensure binary compatibility. -->
+  <ItemGroup>
+    <Protobuf Include="..\Services\Tenders\Tenders.Api\Protos\tenders.proto" GrpcServices="Client" />
+    <Protobuf Include="..\Services\Catalog\Catalog.Api\Protos\catalog.proto" GrpcServices="Client" />
+    <Protobuf Include="..\Services\RiskAssessments\RiskAssessments.WebApi\Protos\riskassessments.proto" GrpcServices="Client" />
+  </ItemGroup>
+
 </Project>

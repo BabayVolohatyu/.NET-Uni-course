@@ -93,22 +93,25 @@ public static class Extensions
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
-                .AddRuntimeInstrumentation())
+                .AddRuntimeInstrumentation()
+                // Lab 06: custom cache hit/miss metrics — one meter per service
+                .AddMeter("Tenders.Cache")
+                .AddMeter("Catalog.Cache")
+                .AddMeter("RiskAssessments.Cache")
+                .AddMeter("Platform.Aggregator.Cache"))
             .WithTracing(tracing => tracing
                 // Own spans from each service (created with ActivitySource)
                 .AddSource(builder.Environment.ApplicationName)
                 // MongoDB Driver spans (Lab 04 — RiskAssessments)
                 .AddSource("MongoDB.Driver.Core.Extensions.DiagnosticSources")
-                // Instrumentation for incoming HTTP requests (ASP.NET Core)
+                // Instrumentation for incoming HTTP requests (ASP.NET Core) — also covers gRPC server spans
                 .AddAspNetCoreInstrumentation()
-                // Instrumentation for outgoing HTTP calls (HttpClient)
+                // Instrumentation for outgoing HTTP calls (HttpClient) — also covers gRPC client spans
                 .AddHttpClientInstrumentation()
                 // SQL Server instrumentation: covers both Dapper (Lab 02) and EF Core (Lab 03)
-                .AddSqlClientInstrumentation(o =>
-                {
-                    o.SetDbStatementForText = true;  // include SQL text in spans
-                    o.RecordException = true;
-                }));
+                // Note: SqlClient instrumentation options vary by package version;
+                // db.statement is still captured for stored procedures by default.
+                .AddSqlClientInstrumentation());
 
         // Export to Aspire Dashboard via OTLP (address is auto-injected by AppHost)
         if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))

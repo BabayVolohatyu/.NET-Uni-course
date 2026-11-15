@@ -25,8 +25,8 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.12.0" />
     <!-- SqlClient covers both Dapper (Lab 02) and EF Core (Lab 03) -->
     <PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.12.0" />
-    <!-- MongoDB tracing for Lab 04 -->
-    <PackageReference Include="MongoDB.Driver.Core.Extensions.DiagnosticSources" Version="1.4.0" />
+    <!-- MongoDB tracing for Lab 04 — upgraded to 3.0.0 for MongoDB.Driver 3.x compatibility -->
+    <PackageReference Include="MongoDB.Driver.Core.Extensions.DiagnosticSources" Version="3.0.0" />
 
     <!-- Serilog: structured logging provider -->
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
