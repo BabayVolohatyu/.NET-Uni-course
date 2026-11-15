@@ -362,3 +362,111 @@ curl -X POST http://localhost:5000/api/tenders/1/bids/award `
 **Connection pooling:** SqlClient connection pooling is enabled by default. `UnitOfWork.DisposeAsync()` returns the connection to the pool rather than physically closing it.
 
 **Duplication policy:** See the table in the main section above. `Bids.ContractorName` and `Bids.ContractorEDRPOU` are immutable snapshots — never updated after submission (same pattern as `OrderItem.ProductName` in Microsoft eShop).
+
+---
+
+## Lab 03 — Catalog (Contractor Registry) Microservice (EF Core)
+
+### Solution structure
+
+```
+Platform.slnx                     ← solution file (updated)
+Services/
+├── Tenders/                       ← P1 Microservice (Lab 02, unchanged)
+└── Catalog/                       ← P2 Microservice — Contractor Registry context (Lab 03)
+    ├── Catalog.Api/               ← Controllers, Program.cs, Swagger, exception handler, Dockerfile
+    ├── Catalog.Bll/               ← Services, DTOs, AutoMapper, Specifications, FluentValidation
+    ├── Catalog.Dal/               ← DbContext, Fluent API Configurations, Migrations, Repositories, UoW, Seeding
+    └── Catalog.Domain/            ← Entities (Contractor, ContractorDetail, ContractorDocument,
+                                      WorkCategory, ContractorWorkCategory), exceptions
+```
+
+### Domain model
+
+| Entity | Relationship | Description |
+|--------|-------------|-------------|
+| `Contractor` | Aggregate root | Company registered in state business registry (EDRPOU) |
+| `ContractorDetail` | 1:1 ← Contractor | Extended details (address, director, contact) |
+| `ContractorDocument` | 1:N ← Contractor | Qualification documents and licenses |
+| `WorkCategory` | Reference table | Types of reconstruction work (ROAD, BLDG, ELEC, PIPE, HEAT) |
+| `ContractorWorkCategory` | M:N junction | Contractor ↔ WorkCategory with QualificationDate |
+
+### Three loading patterns demonstrated
+
+| Repository | Loading Pattern | SQL queries |
+|------------|----------------|-------------|
+| `ContractorRepository.GetWithDetailsAsync` | **Eager Loading** (Include/ThenInclude) | 1 (JOINs) |
+| `WorkCategoryRepository.GetWithContractorsAsync` | **Explicit Loading** (Entry.Collection.LoadAsync) | 2 |
+| `ContractorWorkCategoryRepository.GetRecentlyQualifiedAsync` | **LINQ M:N** (through junction) | 1 |
+
+### Quickstart — Lab 03 Catalog service
+
+```powershell
+# 1. Start SQL Server (shared with Lab 02)
+docker compose up -d
+# Wait ~30 seconds for SQL Server to be ready
+
+# 2. Apply EF Core migrations (creates ContractorRegistry DB, tables, HasData reference seeds)
+dotnet ef database update `
+    --project Services\Catalog\Catalog.Dal `
+    --startup-project Services\Catalog\Catalog.Api
+
+# 3. Run the Catalog API (migrations + idempotent seeding run on startup automatically)
+dotnet run --project Services\Catalog\Catalog.Api
+
+# Open Swagger UI
+start http://localhost:5002/swagger
+```
+
+### API endpoints summary
+
+| Method | URL | Description | Success | Error |
+|--------|-----|-------------|---------|-------|
+| `GET` | `/api/contractors?page=1&pageSize=20&search=` | Paged list with filters | 200 | — |
+| `GET` | `/api/contractors/{id}` | Full contractor card (Eager Loading) | 200 | 404 |
+| `POST` | `/api/contractors` | Create contractor (checks EDRPOU uniqueness) | 201 | 400, 409 |
+| `PUT` | `/api/contractors/{id}` | Update name and capital | 200 | 400, 404 |
+| `DELETE` | `/api/contractors/{id}` | Remove contractor | 204 | 404 |
+| `PATCH` | `/api/contractors/{id}/activate` | Activate contractor | 204 | 404, 409 |
+| `PATCH` | `/api/contractors/{id}/deactivate` | Deactivate contractor | 204 | 404, 409 |
+| `GET` | `/api/work-categories` | All work categories | 200 | — |
+| `GET` | `/api/work-categories/{id}` | Category by ID | 200 | 404 |
+| `GET` | `/api/work-categories/by-code/{code}` | Category by code (e.g. ROAD) | 200 | 404 |
+
+### Self-check commands
+
+```powershell
+# 1. Create contractor (201 Created + Location header)
+curl -X POST http://localhost:5002/api/contractors `
+  -H "Content-Type: application/json" `
+  -d '{"name":"ТОВ Нова Компанія","edrpou":"99988877","authorizedCapital":500000,"registrationDate":"2022-01-15T00:00:00Z"}'
+
+# 2. Duplicate EDRPOU → 409 Conflict
+curl -X POST http://localhost:5002/api/contractors `
+  -H "Content-Type: application/json" `
+  -d '{"name":"Дублікат","edrpou":"99988877","authorizedCapital":100000,"registrationDate":"2022-01-01T00:00:00Z"}'
+
+# 3. Invalid input (empty name) → 400 ValidationProblemDetails
+curl -X POST http://localhost:5002/api/contractors `
+  -H "Content-Type: application/json" `
+  -d '{"name":"","edrpou":"12341234","authorizedCapital":100000,"registrationDate":"2022-01-01T00:00:00Z"}'
+
+# 4. Non-existent ID → 404 ProblemDetails
+curl http://localhost:5002/api/contractors/99999
+
+# 5. Paged list (page 2, 2 per page, sorted by capital desc)
+curl "http://localhost:5002/api/contractors?page=2&pageSize=2&sortBy=capital&sortDir=desc"
+# totalCount = total rows in DB, items = 2 (or fewer on last page)
+```
+
+### Architecture decisions (Lab 03)
+
+**EF Core Code-First + Fluent API**: All entity configurations are in separate `IEntityTypeConfiguration<T>` classes under `Catalog.Dal/Configurations/`. `OnModelCreating` uses `ApplyConfigurationsFromAssembly` — one line.
+
+**Two-phase seeding**: `WorkCategory` rows use `HasData` with fixed Ids (applied by migration, idempotent). `Contractor` rows use `DbInitializer.SeedAsync` with an `AnyAsync` guard (skipped on restart).
+
+**Specification pattern**: `ContractorsFilterSpec` and `ContractorsCountSpec` (Ardalis.Specification) encapsulate filter/sort/page logic. The repository applies them via `WithSpecification(spec)` — the service only constructs and passes specs.
+
+**FluentValidation**: Validators (`CreateContractorDtoValidator`, `UpdateContractorDtoValidator`) are registered via `AddValidatorsFromAssemblyContaining<>` and called explicitly in controllers — no deprecated `AddFluentValidation` middleware.
+
+**Serilog SQL logging**: `MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Information)` enables EF Core SQL query logging — verify that Eager Loading logs 1 query and Explicit Loading logs 2.
