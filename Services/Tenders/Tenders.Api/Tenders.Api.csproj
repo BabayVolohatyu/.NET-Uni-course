@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tenders.Bll\Tenders.Bll.csproj" />
+    <!-- Lab 05: shared platform defaults (Serilog, OTel, CorrelationId, health checks) -->
+    <ProjectReference Include="..\..\..\..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>

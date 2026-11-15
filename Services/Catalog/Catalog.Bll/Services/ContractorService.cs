@@ -7,6 +7,7 @@ using Catalog.Dal.Interfaces;
 using Catalog.Domain.Exceptions;
 using Catalog.Domain.Models;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace Catalog.Bll.Services;
 
@@ -18,9 +19,14 @@ namespace Catalog.Bll.Services;
 ///   - Rules requiring DB data (e.g. EDRPOU uniqueness) → checked here, throw ConflictException
 ///   - Domain rules (capital > 0, valid EDRPOU format) → enforced by entity constructors/methods
 ///   - Pagination/filter/sort queries → delegated to Specification + repository
+///
+/// Lab 05: ActivitySource creates custom spans visible in Aspire Dashboard "Traces".
 /// </summary>
 public sealed class ContractorService : IContractorService
 {
+    // ActivitySource name matches the service name registered in AppHost ("catalog-api")
+    private static readonly ActivitySource _activitySource = new("Catalog.Api");
+
     private readonly IUnitOfWork _uow;
     private readonly IMapper _mapper;
     private readonly ILogger<ContractorService> _logger;
@@ -61,6 +67,11 @@ public sealed class ContractorService : IContractorService
     // ── Create ───────────────────────────────────────────────────────────────────
     public async Task<ContractorDto> CreateAsync(CreateContractorDto input, CancellationToken ct = default)
     {
+        // Custom span for contractor registration business operation
+        using var activity = _activitySource.StartActivity("RegisterContractor");
+        activity?.SetTag("contractor.edrpou", input.EDRPOU);
+        activity?.SetTag("contractor.authorized_capital", input.AuthorizedCapital);
+
         // Service-layer guard: DB uniqueness before the domain entity is even built
         if (await _uow.Contractors.ExistsByEdrpouAsync(input.EDRPOU, ct))
             throw new ConflictException(
@@ -73,7 +84,15 @@ public sealed class ContractorService : IContractorService
         await _uow.Contractors.AddAsync(contractor, ct);
         await _uow.SaveChangesAsync(ct);    // flush to get the generated Id
 
-        _logger.LogInformation("Contractor created: Id={Id}, EDRPOU={EDRPOU}", contractor.Id, contractor.EDRPOU);
+        activity?.SetTag("contractor.id", contractor.Id);
+
+        // Structured business event log — no sensitive data (no passport numbers, contacts)
+        _logger.LogInformation(
+            "Contractor registered: ContractorId={ContractorId} Name={Name} " +
+            "EDRPOU={EDRPOU} AuthorizedCapital={AuthorizedCapital} IsActive={IsActive}",
+            contractor.Id, contractor.Name, contractor.EDRPOU,
+            contractor.AuthorizedCapital, contractor.IsActive);
+
         return _mapper.Map<ContractorDto>(contractor);
     }
 
@@ -116,15 +135,28 @@ public sealed class ContractorService : IContractorService
         contractor.Activate();      // domain method guards the transition
         _uow.Contractors.Update(contractor);
         await _uow.SaveChangesAsync(ct);
+
+        // Business event log: status transitions are auditable in procurement systems
+        _logger.LogInformation(
+            "Contractor activated: ContractorId={ContractorId} EDRPOU={EDRPOU} Status=Active",
+            id, contractor.EDRPOU);
     }
 
     public async Task DeactivateAsync(int id, CancellationToken ct = default)
     {
+        using var activity = _activitySource.StartActivity("DeactivateContractor");
+        activity?.SetTag("contractor.id", id);
+
         var contractor = await _uow.Contractors.GetByIdAsync(id, ct)
             ?? throw new NotFoundException(nameof(Contractor), id);
 
         contractor.Deactivate();
         _uow.Contractors.Update(contractor);
         await _uow.SaveChangesAsync(ct);
+
+        // Business event log: deactivation is a risk signal in anomaly detection
+        _logger.LogInformation(
+            "Contractor deactivated: ContractorId={ContractorId} EDRPOU={EDRPOU} Status=Inactive",
+            id, contractor.EDRPOU);
     }
 }

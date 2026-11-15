@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using AutoMapper;
 using Microsoft.Extensions.Logging;
 using Tenders.Bll.Dtos;
@@ -14,9 +15,16 @@ namespace Tenders.Bll.Services;
 /// Implements tender and procuring-entity business logic.
 /// Uses Unit of Work + repositories; never exposes SQL to the API layer.
 /// Business invariants are enforced here; DataAnnotations guard the DTO boundary in the API layer.
+///
+/// Lab 05: ActivitySource creates custom spans for key business operations.
+/// These spans appear in Aspire Dashboard "Traces" under the tenders-api service.
 /// </summary>
 public sealed class TenderService : ITenderService
 {
+    // ActivitySource name must match the one registered in ServiceDefaults.ConfigureOpenTelemetry
+    // (.AddSource(builder.Environment.ApplicationName) — ApplicationName = "tenders-api")
+    private static readonly ActivitySource _activitySource = new("Tenders.Api");
+
     private readonly IUnitOfWork _uow;
     private readonly IMapper _mapper;
     private readonly ILogger<TenderService> _logger;
@@ -85,6 +93,12 @@ public sealed class TenderService : ITenderService
     public async Task<TenderWithDetailsDto> CreateTenderAsync(
         CreateTenderDto dto, CancellationToken ct = default)
     {
+        // Custom span for the CreateTender business operation (visible in Aspire Dashboard Traces)
+        using var activity = _activitySource.StartActivity("CreateTender");
+        activity?.SetTag("tender.procuring_entity_id", dto.ProcuringEntityId);
+        activity?.SetTag("tender.expected_budget", dto.ExpectedBudget);
+        activity?.SetTag("tender.category_code", dto.CategoryCode);
+
         // Business validation: procuring entity must exist
         var entity = await _uow.ProcuringEntities.GetByIdAsync(dto.ProcuringEntityId, ct)
             ?? throw new NotFoundException($"ProcuringEntity {dto.ProcuringEntityId} not found.");
@@ -112,7 +126,15 @@ public sealed class TenderService : ITenderService
         tender.Id = newId;
         tender.Details.TenderId = newId;
 
-        _logger.LogInformation("Created Tender {Id} for ProcuringEntity {EntityId}", newId, dto.ProcuringEntityId);
+        activity?.SetTag("tender.id", newId);
+        activity?.SetTag("tender.status", TenderStatus.Draft);
+
+        // Structured log with business-specific properties (no sensitive data)
+        _logger.LogInformation(
+            "Tender created: TenderId={TenderId} Title={Title} " +
+            "ProcuringEntityId={ProcuringEntityId} Budget={ExpectedBudget} Status={Status}",
+            newId, dto.Title, dto.ProcuringEntityId, dto.ExpectedBudget, TenderStatus.Draft);
+
         return _mapper.Map<TenderWithDetailsDto>(tender);
     }
 
@@ -133,8 +155,18 @@ public sealed class TenderService : ITenderService
         if (!validStatuses.Contains(newStatus))
             throw new ValidationException($"'{newStatus}' is not a valid tender status.");
 
+        // Custom span for the status transition business event
+        using var activity = _activitySource.StartActivity("ChangeTenderStatus");
+        activity?.SetTag("tender.id", tenderId);
+        activity?.SetTag("tender.new_status", newStatus);
+        activity?.SetTag("tender.change_reason", reason ?? "not provided");
+
         await _uow.Tenders.ChangeStatusAsync(tenderId, newStatus, reason: reason, ct: ct);
-        _logger.LogInformation("Tender {Id} status changed to {Status}", tenderId, newStatus);
+
+        // Structured business event log — auditors can search by TenderId and Status
+        _logger.LogInformation(
+            "Tender status changed: TenderId={TenderId} NewStatus={NewStatus} Reason={Reason}",
+            tenderId, newStatus, reason ?? "");
     }
 
     public async Task<IReadOnlyList<TenderStatusHistoryDto>> GetStatusHistoryAsync(

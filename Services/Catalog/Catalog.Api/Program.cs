@@ -8,22 +8,22 @@ using Catalog.Dal.Interfaces;
 using Catalog.Dal.Seeding;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Logging: Serilog ───────────────────────────────────────────────────────────
-builder.Host.UseSerilog((ctx, cfg) => cfg
-    .ReadFrom.Configuration(ctx.Configuration)
-    // SQL query logging: Information level shows all EF Core commands in the log
-    // — used to verify that Eager Loading runs ONE query and Explicit Loading runs TWO
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Information)
-    .Enrich.FromLogContext()
-    .WriteTo.Console());
+// ── Lab 05: Platform ServiceDefaults ──────────────────────────────────────────
+// Configures Serilog (structured JSON logging with enrichers), OpenTelemetry
+// (tracing + metrics for ASP.NET Core, HttpClient, SQL Server via EF Core),
+// CorrelationId, health checks, service discovery, and resilient HttpClient defaults.
+builder.AddServiceDefaults();
 
 // ── Database: EF Core + SQL Server ────────────────────────────────────────────
+// When running under Aspire (AppHost), Aspire injects ConnectionStrings:ContractorRegistry
+// automatically via environment variable. The appsettings.json value is a fallback.
 var connectionString = builder.Configuration.GetConnectionString("ContractorRegistry")
     ?? throw new InvalidOperationException(
         "Connection string 'ContractorRegistry' is missing. " +
@@ -94,6 +94,10 @@ using (var scope = app.Services.CreateScope())
 
 // ── Middleware pipeline ─────────────────────────────────────────────────────────
 app.UseExceptionHandler();   // activates DomainExceptionHandler
+
+// Lab 05: propagate X-Correlation-Id from Gateway to all log records in this service
+app.UseMiddleware<CorrelationIdMiddleware>();
+
 app.UseSerilogRequestLogging();
 
 if (app.Environment.IsDevelopment())
@@ -108,6 +112,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.MapControllers();
+
+// ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
+app.MapDefaultEndpoints();
 
 app.Run();
 

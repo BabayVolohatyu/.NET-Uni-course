@@ -1,16 +1,31 @@
 using MediatR;
+using Microsoft.Extensions.Logging;
 using RiskAssessments.Domain.Entities;
 using RiskAssessments.Domain.Enums;
 using RiskAssessments.Domain.Interfaces;
 using RiskAssessments.Domain.ValueObjects;
+using System.Diagnostics;
 
 namespace RiskAssessments.Application.RiskAssessments.Commands.CreateRiskAssessment;
 
-public sealed class CreateRiskAssessmentCommandHandler(IRiskAssessmentRepository assessments)
+public sealed class CreateRiskAssessmentCommandHandler(
+    IRiskAssessmentRepository assessments,
+    ILogger<CreateRiskAssessmentCommandHandler> logger)
     : IRequestHandler<CreateRiskAssessmentCommand, string>
 {
+    // ActivitySource for custom spans — visible in Aspire Dashboard "Traces"
+    // ApplicationName = "risk-assessments-api" (registered in ServiceDefaults)
+    private static readonly ActivitySource Source = new("RiskAssessments.WebApi");
+
     public async Task<string> Handle(CreateRiskAssessmentCommand cmd, CancellationToken ct)
     {
+        using var activity = Source.StartActivity("CreateRiskAssessment");
+        activity?.SetTag("tender.id", cmd.TenderId);
+        activity?.SetTag("tender.title", cmd.TenderTitle);
+        activity?.SetTag("risk.level", cmd.RiskLevel);
+        activity?.SetTag("risk.score", cmd.OverallRiskScore);
+        activity?.SetTag("procuring_entity.id", cmd.ProcuringEntityId);
+
         var level = Enum.Parse<RiskLevel>(cmd.RiskLevel, ignoreCase: true);
         Money? budget = cmd.ExpectedBudgetAmount is decimal amount
             ? new Money(amount, string.IsNullOrWhiteSpace(cmd.ExpectedBudgetCurrency) ? "UAH" : cmd.ExpectedBudgetCurrency)
@@ -27,6 +42,18 @@ public sealed class CreateRiskAssessmentCommandHandler(IRiskAssessmentRepository
             budget);
 
         await assessments.AddAsync(assessment, ct);
+
+        activity?.SetTag("assessment.id", assessment.Id.ToString());
+
+        // Structured business event log — auditors track risk assessment creation by TenderId and RiskLevel
+        logger.LogInformation(
+            "Risk assessment created: AssessmentId={AssessmentId} TenderId={TenderId} " +
+            "TenderTitle={TenderTitle} RiskLevel={RiskLevel} OverallRiskScore={OverallRiskScore} " +
+            "ProcuringEntityId={ProcuringEntityId} AuditorId={AuditorId}",
+            assessment.Id, cmd.TenderId, cmd.TenderTitle,
+            cmd.RiskLevel, cmd.OverallRiskScore,
+            cmd.ProcuringEntityId, cmd.AuditorId);
+
         return assessment.Id.ToString();
     }
 }

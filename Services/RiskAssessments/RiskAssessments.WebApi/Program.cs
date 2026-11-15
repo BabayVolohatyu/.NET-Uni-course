@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using RiskAssessments.Application;
 using RiskAssessments.Application.Mapping;
 using RiskAssessments.Infrastructure;
@@ -9,10 +10,11 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Host.UseSerilog((ctx, cfg) => cfg
-    .ReadFrom.Configuration(ctx.Configuration)
-    .Enrich.FromLogContext()
-    .WriteTo.Console());
+// ── Lab 05: Platform ServiceDefaults ──────────────────────────────────────────
+// Configures Serilog (structured JSON logging with enrichers), OpenTelemetry
+// (tracing + metrics for ASP.NET Core, HttpClient, MongoDB via DiagnosticSources),
+// CorrelationId, health checks, service discovery, and resilient HttpClient defaults.
+builder.AddServiceDefaults();
 
 builder.Services
     .AddApplication(builder.Configuration)
@@ -67,6 +69,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseExceptionHandler();
+
+// Lab 05: propagate X-Correlation-Id from Gateway to all log records in this service
+app.UseMiddleware<CorrelationIdMiddleware>();
+
 app.UseSerilogRequestLogging();
 
 if (!app.Environment.IsProduction())
@@ -80,7 +86,12 @@ if (!app.Environment.IsProduction())
 }
 
 app.MapControllers();
-app.MapHealthChecks("/health");
+
+// ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
+// MapDefaultEndpoints provides /health (full readiness) and /alive (liveness).
+// The existing .AddHealthChecks().AddMongoDb(...) check is included automatically.
+app.MapDefaultEndpoints();
+
 app.Run();
 
 public partial class Program;

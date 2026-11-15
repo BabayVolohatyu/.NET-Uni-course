@@ -1,19 +1,26 @@
-﻿<Project Sdk="Aspire.AppHost.Sdk/13.6.5">
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="9.3.0" />
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UserSecretsId>platform-apphost</UserSecretsId>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.6.5" />
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="9.3.0" />
+    <PackageReference Include="Aspire.Hosting.MongoDB" Version="9.3.0" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Microservices from previous labs -->
     <ProjectReference Include="..\Services\Tenders\Tenders.Api\Tenders.Api.csproj" />
+    <ProjectReference Include="..\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
+    <ProjectReference Include="..\Services\RiskAssessments\RiskAssessments.WebApi\RiskAssessments.WebApi.csproj" />
+    <!-- New platform components -->
+    <ProjectReference Include="..\Platform.ApiGateway\Platform.ApiGateway.csproj" />
+    <ProjectReference Include="..\Platform.Aggregator\Platform.Aggregator.csproj" />
   </ItemGroup>
-
 </Project>

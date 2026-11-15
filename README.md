@@ -571,3 +571,105 @@ dotnet test Services\RiskAssessments\RiskAssessments.Tests
 ```
 
 Covers a score of 120 (no database), value-object equality, and a BSON round-trip: camelCase, embedded `triggeredFlags`, no leaked `_triggeredFlags` field.
+
+---
+
+## Lab 05 — .NET Aspire Platform: Gateway, Aggregator, OpenTelemetry
+
+This lab integrates all three microservices (Labs 02–04) into a unified .NET Aspire platform with centralized observability, an API Gateway, and an Aggregator service.
+
+### Platform architecture
+
+| Component | Role | Technology |
+|-----------|------|------------|
+| `Platform.AppHost` | Aspire orchestrator — starts all services and DB containers with one command | .NET Aspire AppHost SDK |
+| `Platform.ServiceDefaults` | Shared library — Serilog, OpenTelemetry, CorrelationId, health checks, resilience | Serilog, OTel, Polly |
+| `Platform.ApiGateway` | Single entry point for clients — routes requests via YARP | YARP + Aspire service discovery |
+| `Platform.Aggregator` | Aggregator Pattern — parallel calls with partial failure tolerance | HttpClient + Task.WhenAll |
+| `Tenders.Api` | Lab 02 microservice — tender lifecycle (ADO.NET + Dapper) | SQL Server (`ProcurementBidding`) |
+| `Catalog.Api` | Lab 03 microservice — contractor registry (EF Core) | SQL Server (`ContractorRegistry`) |
+| `RiskAssessments.WebApi` | Lab 04 microservice — risk assessment (Clean Architecture + CQRS) | MongoDB (`RiskAssessmentDb`) |
+
+### Quick start (all-in-one with Aspire)
+
+**Prerequisites:** Docker Desktop running, .NET 10 SDK, .NET Aspire workload installed.
+
+```powershell
+# Install Aspire workload (once)
+dotnet workload install aspire
+
+# Set the SQL Server password secret (once per machine)
+cd Platform.AppHost
+dotnet user-secrets set "sql-password" "YourStrong!Passw0rd"
+cd ..
+
+# Launch the entire platform
+dotnet run --project Platform.AppHost
+```
+
+Aspire Dashboard opens automatically at `http://localhost:15888`. All services, SQL Server, and MongoDB containers start in the correct order.
+
+**API Gateway** is available at `http://localhost:5000`.
+
+### Gateway routes (via `http://localhost:5000`)
+
+| Route pattern | Proxied to |
+|---------------|-----------|
+| `GET /api/tenders/{**}` | `tenders-api` |
+| `GET /api/contractors/{**}` | `catalog-api` |
+| `GET /api/risk-assessments/{**}` | `risk-assessments-api` |
+| `GET /api/aggregator/{**}` | `aggregator` |
+
+### Aggregator endpoint
+
+```powershell
+# Full tender view: tender data + contractor list + risk assessments
+# (parallel calls with partial failure tolerance)
+curl -i http://localhost:5000/api/aggregator/tenders/1/full
+
+# Platform health aggregate across all services
+curl -i http://localhost:5000/api/aggregator/health
+```
+
+**Response headers include `X-Correlation-Id`** — use it to find all logs for the request in Aspire Dashboard → Structured logs.
+
+### Individual service endpoints (via Gateway)
+
+```powershell
+# Tenders
+curl http://localhost:5000/api/tenders/1
+curl http://localhost:5000/api/procuring-entities
+
+# Contractors
+curl "http://localhost:5000/api/contractors?page=1&pageSize=10"
+
+# Risk Assessments
+curl "http://localhost:5000/api/risk-assessments?page=1&pageSize=5"
+```
+
+### Observability (Aspire Dashboard)
+
+1. **Traces** tab: search for the CorrelationId to find the full distributed trace. The aggregation trace shows spans for Gateway → Aggregator → (tenders-api, catalog-api, risk-assessments-api in parallel) → SQL/MongoDB queries.
+2. **Structured logs** tab: filter by `CorrelationId` to find all log records from every service in one request chain. Each record includes `ServiceName`, `Environment`, `MachineName`, `ThreadId`.
+3. **Metrics** tab: request counts, duration histograms, error rates per service.
+
+### Partial failure scenario
+
+Stop `risk-assessments-api` from the Aspire Dashboard, then:
+```powershell
+curl http://localhost:5000/api/aggregator/tenders/1/full
+```
+The response returns tender data + contractors with `warnings: ["risk-assessments-api is unavailable: ..."]` — HTTP 200, not 500.
+
+### Standalone service startup (without Aspire)
+
+Each service can still run independently with Docker containers:
+```powershell
+docker run -d -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourStrong!Passw0rd" \
+  -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
+docker run -d -p 27017:27017 mongo:7
+
+dotnet run --project Services\Tenders\Tenders.Api
+dotnet run --project Services\Catalog\Catalog.Api
+dotnet run --project Services\RiskAssessments\RiskAssessments.WebApi
+```

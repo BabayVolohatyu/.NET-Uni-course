@@ -15,6 +15,8 @@
   <ItemGroup>
     <ProjectReference Include="..\RiskAssessments.Application\RiskAssessments.Application.csproj" />
     <ProjectReference Include="..\RiskAssessments.Infrastructure\RiskAssessments.Infrastructure.csproj" />
+    <!-- Lab 05: shared platform defaults (Serilog, OTel, CorrelationId, health checks) -->
+    <ProjectReference Include="..\..\..\..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

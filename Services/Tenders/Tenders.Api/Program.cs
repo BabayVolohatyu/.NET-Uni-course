@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using Tenders.Api.Middleware;
 using Tenders.Bll.Interfaces;
@@ -9,14 +10,17 @@ using Tenders.Dal.Interfaces;
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Logging: Serilog ───────────────────────────────────────────────────────────
-builder.Host.UseSerilog((ctx, cfg) => cfg
-    .ReadFrom.Configuration(ctx.Configuration)
-    .Enrich.FromLogContext()
-    .WriteTo.Console());
+// ── Lab 05: Platform ServiceDefaults ──────────────────────────────────────────
+// Configures Serilog (structured JSON logging with enrichers), OpenTelemetry
+// (tracing + metrics for ASP.NET Core, HttpClient, SQL Server), CorrelationId,
+// health checks, service discovery, and resilient HttpClient defaults.
+// ⚠️ Must come before any other configuration that depends on ILogger.
+builder.AddServiceDefaults();
 
 // ── Connection string ──────────────────────────────────────────────────────────
-// Can be overridden at runtime via env var: ConnectionStrings__ProcurementBidding=...
+// When running under Aspire (AppHost), Aspire injects ConnectionStrings:ProcurementBidding
+// automatically via environment variable. The appsettings.json value is a fallback for
+// running the service standalone (without AppHost).
 var connectionString = builder.Configuration.GetConnectionString("ProcurementBidding")
     ?? throw new InvalidOperationException(
         "Connection string 'ProcurementBidding' is missing from configuration. " +
@@ -68,6 +72,9 @@ var app = builder.Build();
 // ── Middleware pipeline ────────────────────────────────────────────────────────
 app.UseExceptionHandler();   // activates DomainExceptionHandler for all unhandled exceptions
 
+// Lab 05: propagate X-Correlation-Id from Gateway to all log records in this service
+app.UseMiddleware<CorrelationIdMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -80,6 +87,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.MapControllers();
+
+// ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
+// These are consumed by Aspire Dashboard to display service readiness status.
+app.MapDefaultEndpoints();
 
 app.Run();
 
