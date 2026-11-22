@@ -1,0 +1,55 @@
+body {
+    font-family: "Segoe UI", sans-serif;
+    margin: 0;
+    background: #f4f1ea;
+    color: #1c2430;
+}
+
+header {
+    background: #1f3b2c;
+    color: #f4f1ea;
+    padding: 1rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+main {
+    max-width: 40rem;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+.card {
+    background: white;
+    border: 1px solid #d9d3c5;
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+label {
+    display: block;
+    margin: 0.75rem 0;
+}
+
+input[type="text"], input[type="password"], input:not([type]) {
+    display: block;
+    width: 100%;
+    margin-top: 0.25rem;
+    padding: 0.4rem;
+}
+
+button {
+    margin-right: 0.5rem;
+    margin-top: 0.75rem;
+    padding: 0.45rem 0.8rem;
+}
+
+.error {
+    color: #8c1d18;
+}
+
+.hint {
+    color: #5c564c;
+    font-size: 0.9rem;
+}

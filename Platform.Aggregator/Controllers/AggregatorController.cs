@@ -1,4 +1,5 @@
 using Catalog.Grpc;
+using Microsoft.AspNetCore.Authorization;
 using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Distributed;
@@ -25,6 +26,7 @@ namespace Platform.Aggregator.Controllers;
 ///   • Cache checked BEFORE gRPC calls; partial responses are NOT cached.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/aggregator")]
 [Produces("application/json")]
 public class AggregatorController(

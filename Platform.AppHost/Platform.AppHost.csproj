@@ -16,6 +16,8 @@
     <!-- Lab 06: Redis container for distributed caching -->
     <PackageReference Include="Aspire.Hosting.Redis" Version="9.3.0" />
     <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="9.3.0" />
+    <!-- Lab 09: Keycloak container, service discovery, data volume. -->
+    <PackageReference Include="Aspire.Hosting.Keycloak" Version="9.3.1-preview.1.25305.6" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,5 +28,9 @@
     <!-- New platform components -->
     <ProjectReference Include="..\Platform.ApiGateway\Platform.ApiGateway.csproj" />
     <ProjectReference Include="..\Platform.Aggregator\Platform.Aggregator.csproj" />
+    <!-- Lab 09 -->
+    <ProjectReference Include="..\Services\Auth\Auth.Api\Auth.Api.csproj" />
+    <ProjectReference Include="..\Services\Payments\Payments.Api\Payments.Api.csproj" />
+    <ProjectReference Include="..\Platform.IdentityServer\Platform.IdentityServer.csproj" />
   </ItemGroup>
 </Project>

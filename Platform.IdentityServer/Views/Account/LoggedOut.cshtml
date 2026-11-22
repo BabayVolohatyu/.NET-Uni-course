@@ -1,0 +1,13 @@
+@model LoggedOutViewModel
+<section class="card">
+    <h1>Вихід виконано</h1>
+    <p>Сесію аудитора на IdentityServer завершено.</p>
+    @if (!string.IsNullOrEmpty(Model.PostLogoutRedirectUri))
+    {
+        <p><a href="@Model.PostLogoutRedirectUri">Повернутися до @Model.ClientName</a></p>
+    }
+    @if (!string.IsNullOrEmpty(Model.SignOutIframeUrl))
+    {
+        <iframe width="0" height="0" src="@Model.SignOutIframeUrl" title="signout"></iframe>
+    }
+</section>

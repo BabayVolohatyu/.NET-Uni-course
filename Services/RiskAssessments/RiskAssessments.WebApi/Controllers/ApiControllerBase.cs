@@ -1,9 +1,11 @@
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace RiskAssessments.WebApi.Controllers;
 
 [ApiController]
+[Authorize]
 public abstract class ApiControllerBase(ISender mediator) : ControllerBase
 {
     protected ISender Mediator { get; } = mediator;

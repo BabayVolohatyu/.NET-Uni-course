@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Tenders.Api.Metrics;
 using Tenders.Bll.Dtos;
@@ -12,10 +14,32 @@ namespace Tenders.Api.Controllers;
 /// and business rules are in TenderService.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/tenders")]
 [Produces("application/json")]
 public class TendersController(ITenderService tenderService, TenderMetrics metrics) : ControllerBase
 {
+    /// <summary>
+    /// Tenders visible to the caller. An Admin auditor sees the whole stream.
+    /// A User clerk is limited to the identity carried in the access token.
+    /// </summary>
+    [HttpGet("mine")]
+    public IActionResult GetMine()
+    {
+        var userId = User.FindFirst("userId")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value;
+        var username = User.FindFirst("username")?.Value;
+        var isAdmin = User.IsInRole("Admin");
+
+        return Ok(new
+        {
+            userId,
+            username,
+            scope = isAdmin ? "all-tenders" : "own-tenders-only"
+        });
+    }
+
     /// <summary>Get a tender with its full details.</summary>
     [HttpGet("{id:long}")]
     [ProducesResponseType(typeof(TenderWithDetailsDto), StatusCodes.Status200OK)]

@@ -1,0 +1,4 @@
+config:
+  procurement-keycloak:url: http://localhost:8080
+  procurement-keycloak:admin: admin
+  procurement-keycloak:password: admin123

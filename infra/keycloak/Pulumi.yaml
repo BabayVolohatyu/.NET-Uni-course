@@ -1,0 +1,3 @@
+name: procurement-keycloak
+description: Realm, resource servers, roles and test users for reconstruction-procurement audit
+runtime: dotnet

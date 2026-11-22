@@ -1,4 +1,5 @@
 using Catalog.Api.Metrics;
+using Microsoft.AspNetCore.Authorization;
 using Catalog.Bll.DTOs;
 using Catalog.Bll.Interfaces;
 using Catalog.Bll.Queries;
@@ -22,6 +23,7 @@ namespace Catalog.Api.Controllers;
 ///   409 Conflict    — duplicate EDRPOU or domain rule violation (ProblemDetails)
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/contractors")]
 [Produces("application/json")]
 public sealed class ContractorsController(IContractorService service, ContractorMetrics metrics) : ControllerBase

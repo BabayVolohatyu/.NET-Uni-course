@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Platform.ServiceDefaults.Auth;
 using Platform.EventBus;
 using RiskAssessments.WebApi.IntegrationEvents;
 using RiskAssessments.Application;
@@ -103,6 +104,21 @@ builder.Services.AddGrpc(o => o.Interceptors.Add<RiskAssessments.WebApi.Grpc.Log
 builder.Services.AddGrpcHealthChecks();
 builder.AddRiskAssessmentHealthChecks();
 
+// ── Lab 09: every microservice validates JWT locally (Auth Service, IdentityServer, Keycloak). ──
+builder.Services.AddProcurementJwt(
+    builder.Configuration,
+    identityServerAudience: "orders_api",
+    validateIdentityServerAudience: false);
+builder.Services.AddAuthentication()
+    .AddKeycloakJwtBearer("keycloak", realm: "DevRealmDrivers", options =>
+    {
+        options.Audience = "orders-api";
+        options.TokenValidationParameters.ValidateAudience = false;
+        if (builder.Environment.IsDevelopment())
+            options.RequireHttpsMetadata = false;
+    });
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -134,6 +150,8 @@ if (!app.Environment.IsProduction())
     });
 }
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 
 // ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────

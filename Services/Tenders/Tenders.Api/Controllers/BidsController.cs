@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Tenders.Api.Metrics;
 using Tenders.Bll.Dtos;
@@ -10,6 +11,7 @@ namespace Tenders.Api.Controllers;
 /// No business logic — delegates entirely to IBidService.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/tenders/{tenderId:long}/bids")]
 [Produces("application/json")]
 public class BidsController(IBidService bidService, TenderMetrics metrics) : ControllerBase

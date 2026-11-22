@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Tenders.Bll.Dtos;
 using Tenders.Bll.Interfaces;
@@ -10,6 +11,7 @@ namespace Tenders.Api.Controllers;
 /// No SQL, no business rules — only HTTP contract (routes, status codes, CancellationToken forwarding).
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/procuring-entities")]
 [Produces("application/json")]
 public class ProcuringEntitiesController(ITenderService tenderService) : ControllerBase

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
+using Platform.Aggregator.Clients;
+using Platform.ServiceDefaults.Auth;
 using Platform.Aggregator.Caching;
 using Platform.Aggregator.HealthChecks;
 using Platform.Aggregator.Metrics;
@@ -66,6 +68,25 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddProblemDetails();
 
+// ── Lab 09: user JWTs on the dossier API, plus a client-credentials token for downstream calls ──
+builder.Services.AddProcurementJwt(
+    builder.Configuration,
+    identityServerAudience: "orders_api",
+    validateIdentityServerAudience: false);
+builder.Services.AddAuthentication()
+    .AddKeycloakJwtBearer("keycloak", realm: "DevRealmDrivers", options =>
+    {
+        options.Audience = "orders-api";
+        options.TokenValidationParameters.ValidateAudience = false;
+        if (builder.Environment.IsDevelopment())
+            options.RequireHttpsMetadata = false;
+    });
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IdentityServerTokenClient>();
+builder.Services.AddHttpClient("tenders-http", client => client.BaseAddress = new Uri("https+http://tenders-api"));
+builder.Services.AddHttpClient("catalog-http", client => client.BaseAddress = new Uri("https+http://catalog-api"));
+builder.Services.AddHttpClient("identityserver-token");
+
 var app = builder.Build();
 
 // Circuit-breaker transitions log through this logger (OnOpened = Error, OnClosed = Information).
@@ -95,6 +116,8 @@ app.UseExceptionHandler(o => o.Run(async context =>
     });
 }));
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 app.MapDefaultEndpoints();
 

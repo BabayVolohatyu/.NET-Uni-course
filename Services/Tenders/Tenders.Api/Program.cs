@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Platform.EventBus;
+using Platform.ServiceDefaults.Auth;
 using Tenders.Api.IntegrationEvents;
 using Serilog;
 using Tenders.Api.Grpc;
@@ -119,6 +120,19 @@ builder.Services.AddProblemDetails(o =>
     });
 builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
+// ── Lab 09: Auth Service JWT, IdentityServer (orders_api), Keycloak realm DevRealmDrivers ──
+builder.Services.AddProcurementJwt(builder.Configuration, identityServerAudience: "orders_api");
+builder.Services.AddAuthentication()
+    .AddKeycloakJwtBearer("keycloak", realm: "DevRealmDrivers", options =>
+    {
+        options.Audience = "orders-api";
+        if (builder.Environment.IsDevelopment())
+            options.RequireHttpsMetadata = false;
+    });
+builder.Services.AddPermissionAndScopePolicies(
+    permissions: ["orders:read", "orders:create", "orders:update", "orders:delete", "orders:approve"],
+    scopes: ["orders.read", "orders.write"]);
+
 // ── Build ──────────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
@@ -141,6 +155,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 
 // ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────

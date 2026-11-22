@@ -16,6 +16,7 @@ var sql = builder.AddSqlServer("sql", sqlPassword)
 // Aspire injects them as: ConnectionStrings:<DbName> environment variable.
 var procurementDb = sql.AddDatabase("ProcurementBidding");   // Lab 02 — Tenders.Api (ADO.NET + Dapper)
 var contractorDb  = sql.AddDatabase("ContractorRegistry");   // Lab 03 — Catalog.Api (EF Core)
+var identityDb    = sql.AddDatabase("IdentityDb");           // Lab 09 — Auth.Api (ASP.NET Identity)
 
 // ── MongoDB container ─────────────────────────────────────────────────────────
 var mongo = builder.AddMongoDB("mongo")
@@ -38,6 +39,17 @@ var rabbit = builder.AddRabbitMQ("messaging")
     .WithDataVolume("procurement-rabbitmq-data")
     .WithManagementPlugin();
 
+// ── Lab 09: IdentityServer has its own SQL Server (security isolation) ───────
+var identityServerSql = builder.AddSqlServer("identityserver-sql", sqlPassword)
+    .WithDataVolume("identityserver-sql-data");
+var identityServerDb = identityServerSql.AddDatabase("IdentityServerDb");
+
+// ── Lab 09: Keycloak (Aspire trajectory B). Realm data survives restarts. ────
+var keycloakAdmin = builder.AddParameter("keycloak-admin");
+var keycloakPassword = builder.AddParameter("keycloak-password", secret: true);
+var keycloak = builder.AddKeycloak("keycloak", port: 8080, adminUsername: keycloakAdmin, adminPassword: keycloakPassword)
+    .WithDataVolume();
+
 // ── Microservices (Labs 02–04, extended in Lab 06 with Redis) ─────────────────
 // WithReference injects the connection string; WaitFor ensures the DB is ready first.
 // Lab 06: each service also receives a Redis reference for distributed caching.
@@ -47,18 +59,35 @@ var tenders = builder.AddProject<Projects.Tenders_Api>("tenders-api")
     .WithReference(procurementDb).WaitFor(procurementDb)
     .WithReference(redis).WaitFor(redis)
     .WithReference(rabbit).WaitFor(rabbit)
+    .WithReference(keycloak).WaitFor(keycloak)
     .WithHttpHealthCheck("/health");
 
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WithReference(contractorDb).WaitFor(contractorDb)
     .WithReference(redis).WaitFor(redis)
     .WithReference(rabbit).WaitFor(rabbit)
+    .WithReference(keycloak).WaitFor(keycloak)
     .WithHttpHealthCheck("/health");
 
 var riskAssessments = builder.AddProject<Projects.RiskAssessments_WebApi>("risk-assessments-api")
     .WithReference(riskAssessmentDb).WaitFor(riskAssessmentDb)
     .WithReference(redis).WaitFor(redis)
     .WithReference(rabbit).WaitFor(rabbit)
+    .WithReference(keycloak)
+    .WithHttpHealthCheck("/health");
+
+var auth = builder.AddProject<Projects.Auth_Api>("auth-api")
+    .WithReference(identityDb).WaitFor(identityDb)
+    .WithHttpHealthCheck("/health");
+
+var payments = builder.AddProject<Projects.Payments_Api>("payments-api")
+    .WithReference(keycloak).WaitFor(keycloak)
+    .WithHttpHealthCheck("/health");
+
+// Gateway already publishes port 5000, so IdentityServer is fixed on 5100.
+var identityServer = builder.AddProject<Projects.Platform_IdentityServer>("identityserver")
+    .WithReference(identityServerDb).WaitFor(identityServerDb)
+    .WithHttpEndpoint(port: 5100, name: "http")
     .WithHttpHealthCheck("/health");
 
 // ── Aggregator (Lab 06: Redis for caching aggregated responses) ───────────────
@@ -69,6 +98,8 @@ var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
     .WithReference(tenders).WaitFor(tenders)
     .WithReference(catalog).WaitFor(catalog)
     .WithReference(riskAssessments).WaitFor(riskAssessments)
+    .WithReference(identityServer).WaitFor(identityServer)
+    .WithReference(keycloak)
     .WithReference(redis).WaitFor(redis)
     .WithHttpHealthCheck("/health");
 
@@ -81,7 +112,12 @@ builder.AddProject<Projects.Platform_ApiGateway>("gateway")
     .WithReference(catalog)
     .WithReference(riskAssessments)
     .WithReference(aggregator)
+    .WithReference(auth)
+    .WithReference(payments)
+    .WithReference(keycloak)
     .WaitFor(aggregator)
+    .WaitFor(auth)
+    .WaitFor(payments)
     .WithHttpHealthCheck("/health");
 
 builder.Build().Run();

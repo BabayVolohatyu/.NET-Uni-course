@@ -1,4 +1,5 @@
 using Catalog.Api.Grpc;
+using Platform.ServiceDefaults.Auth;
 using Platform.EventBus;
 using Catalog.Api.HealthChecks;
 using Catalog.Api.Metrics;
@@ -116,6 +117,19 @@ builder.Services.AddProblemDetails(o =>
     });
 builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
+// ── Lab 09: Auth Service JWT, IdentityServer (products_api), Keycloak realm DevRealmDrivers ──
+builder.Services.AddProcurementJwt(builder.Configuration, identityServerAudience: "products_api");
+builder.Services.AddAuthentication()
+    .AddKeycloakJwtBearer("keycloak", realm: "DevRealmDrivers", options =>
+    {
+        options.Audience = "products-api";
+        if (builder.Environment.IsDevelopment())
+            options.RequireHttpsMetadata = false;
+    });
+builder.Services.AddPermissionAndScopePolicies(
+    permissions: ["products:read", "products:create", "products:update", "products:delete", "products:publish"],
+    scopes: ["products.read", "products.write"]);
+
 // ── Build ──────────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
@@ -151,6 +165,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 
 // ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────

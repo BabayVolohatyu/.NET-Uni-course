@@ -848,3 +848,129 @@ In the Aspire dashboard, open the RabbitMQ management endpoint (container port 1
 The local contractor id is the registry id. The seeded shell-company flag references contractor `101`. Renaming that registry contractor updates `dbo.Contractors` in ProcurementBidding and `triggeredFlags.contractorName` on matching assessments. Bids that already name the contractor keep the name and price from submission time.
 
 Publishing the same body again with the same `EventId` (management UI, or a second delivery) does not change the data. A message whose body is not JSON is nacked into the DLQ. Stopping `tenders-api`, changing several capitals, then starting it again drains `tenders.catalog-sync`.
+
+---
+
+## Lab 09 — Authentication and authorization
+
+Three issuers sit in front of the same procurement APIs. They are a sequence, not a choice: ASP.NET Identity for the platform's own auditors, Duende IdentityServer for OAuth clients, Keycloak for a centrally provisioned realm. The gateway on port 5000 is the only public door. HTTP routes under `/api/*`, `/orders`, `/products` and `/payments` now require a bearer token (a Lab 08 `curl` without one returns 401). gRPC between the aggregator and the services stays internal and anonymous.
+
+| Handout name | This platform | Resource server | IdentityServer API |
+|--------------|---------------|-----------------|--------------------|
+| Orders | `Services/Tenders` (tenders) | `orders-api` | `orders_api` |
+| Products | `Services/Catalog` (work packages) | `products-api` | `products_api` |
+| Reviews | `Services/RiskAssessments` | JWT only, not in the payments matrix | — |
+| Payments | `Services/Payments` (fund disbursements) | `payments-api` | — |
+
+### Ports and databases
+
+| Process | Port | Database |
+|---------|------|----------|
+| Gateway | 5000 | — |
+| IdentityServer | 5100 | Aspire SQL `IdentityServerDb` (own server `identityserver-sql`) |
+| Auth Service | 5090 | Aspire SQL `IdentityDb` on the platform SQL Server |
+| Payments | 5003 | none (in-memory disbursements) |
+| Keycloak | 8080 | Aspire volume `keycloak` |
+| Tenders / Catalog / Risk | 5052 / 5002 / 5004 | unchanged from earlier labs |
+
+`docker-compose.yml` is still only SQL Server and MongoDB. Identity databases and Keycloak are started by Aspire, so they do not fight with port 1433. User ids in the JWT are not foreign keys into ProcurementBidding, ContractorRegistry, or the risk-assessment documents.
+
+```powershell
+cd Platform.AppHost
+dotnet user-secrets set "sql-password" "YourStrong!Passw0rd"
+cd ..
+dotnet run --project Platform.AppHost
+```
+
+Keycloak admin is `admin` / `admin123` (`Platform.AppHost/appsettings.json`, parameters `keycloak-admin` and `keycloak-password`). Auth Service and IdentityServer both seed `auditor.admin` / `Admin123!` (roles Admin and User) and `auditor.user` / `User12345!` (role User). Email is already confirmed. A new registration is not: login returns 403 until `POST /auth/verify-email`. In Development the confirmation and reset tokens are in `GET /auth/dev/mailbox` (404 outside Development). Refresh tokens are an HttpOnly cookie named `refreshToken` (`Path=/auth`, 7 days). Access tokens expire after 15 minutes. Refresh rotates: the presented token is revoked, and reusing a revoked token revokes the whole family. Password reset revokes every refresh token of that auditor.
+
+### What each token looks like
+
+Auth Service (roles, HMAC, issuer `procurement-auth`, audience `procurement-platform`):
+
+```json
+{
+  "iss": "procurement-auth",
+  "aud": "procurement-platform",
+  "sub": "8f1c0b2e-6a4d-4e1a-9c3b-1d2e3f4a5b6c",
+  "userId": "8f1c0b2e-6a4d-4e1a-9c3b-1d2e3f4a5b6c",
+  "unique_name": "auditor.admin",
+  "username": "auditor.admin",
+  "roles": ["Admin", "User"]
+}
+```
+
+IdentityServer client credentials (`POST http://localhost:5100/connect/token`, client `aggregator_service` / `aggregator_secret`). There is no human `sub`:
+
+```json
+{
+  "iss": "http://localhost:5100",
+  "aud": ["orders_api", "products_api"],
+  "client_id": "aggregator_service",
+  "sub": "aggregator_service",
+  "scope": "orders_api products_api orders.read orders.write products.read products.write"
+}
+```
+
+Keycloak manager (`john.manager` in realm `DevRealmDrivers`). `PUT /orders/1` is allowed, `DELETE /orders/1` is not, and no payment scope is present:
+
+```json
+{
+  "iss": "http://localhost:8080/realms/DevRealmDrivers",
+  "preferred_username": "john.manager",
+  "realm_access": { "roles": ["manager"] },
+  "authorization": {
+    "permissions": [
+      { "rsname": "orders-api", "scopes": ["orders:read", "orders:update", "orders:approve"] },
+      { "rsname": "products-api", "scopes": ["products:read", "products:update", "products:publish"] }
+    ]
+  }
+}
+```
+
+IdentityServer scopes use a dot (`orders.read`). Keycloak scopes use a colon (`orders:read`). Scope policies are on `/api/tenders/scopes/*` and `/api/products/scopes/*` and are not stacked on the permission routes, so a Keycloak token is not rejected for lacking an IdentityServer scope.
+
+### Permission matrix (actual status codes)
+
+Allowed calls return **200**. Allowed `DELETE` returns **204**. A valid token without the permission returns **403** (never 500). No token at the gateway returns **401**. Unknown id after the permission check returns **404**. Rows below use existing ids `1`.
+
+| Endpoint | Permission | admin | manager | user | guest |
+|----------|------------|-------|---------|------|-------|
+| GET /orders | orders:read | 200 | 200 | 200 | 403 |
+| POST /orders | orders:create | 200 | 403 | 200 | 403 |
+| PUT /orders/{id} | orders:update | 200 | 200 | 403 | 403 |
+| DELETE /orders/{id} | orders:delete | 204 | 403 | 403 | 403 |
+| POST /orders/{id}/approve | orders:approve | 200 | 200 | 403 | 403 |
+| GET /products | products:read | 200 | 200 | 200 | 200 |
+| POST /products | products:create | 200 | 403 | 403 | 403 |
+| PUT /products/{id} | products:update | 200 | 200 | 403 | 403 |
+| DELETE /products/{id} | products:delete | 204 | 403 | 403 | 403 |
+| POST /products/{id}/publish | products:publish | 200 | 200 | 403 | 403 |
+| GET /payments | payments:read | 200 | 403 | 403 | 403 |
+| POST /payments/process | payments:process | 200 | 403 | 403 | 403 |
+| POST /payments/refund | payments:refund | 200 | 403 | 403 | 403 |
+
+The control point: manager gets 200 on `PUT /orders/1` and 403 on `DELETE /orders/1`. A user gets 403 on every `/payments` route. Auth Service role `User` (capital U) is not the Keycloak role `user`. That clerk sees only tenders they opened (`OpenedBy`).
+
+Postman: `docs/postman/lab-09-procurement-auth.postman_collection.json`.
+
+### Keycloak via Pulumi
+
+Aspire starts Keycloak (trajectory B: `AddKeycloak` on port 8080 with a data volume). The realm is not clicked together in the admin console. From `infra/keycloak`, after Keycloak is up:
+
+```powershell
+cd infra/keycloak
+pulumi stack init dev
+pulumi preview
+pulumi up
+pulumi stack output
+pulumi destroy
+```
+
+Stack config is in `Pulumi.dev.yaml` (`http://localhost:8080`, admin / admin123). Outputs are `RealmUrl`, `AdminConsoleUrl`, `ClientIds`, `ClientSecrets`.
+
+The project declares realm `DevRealmDrivers` (registration, password reset, remember-me, themes), resource servers `orders-api`, `products-api`, `payments-api` with the scopes in the table above, realm roles, role policies, and scope permissions. Payments policies exist only for `admin`. Composite role `procurement-auditor` includes `user`. Composite role `fund-controller` includes `admin` and the client role `fund-disbursement` on `payments-api`. Clients come from `OpenIdClientFactory`: `orders.postman` (authorization code, secret `postman-dev-secret`), `orders.swagger` (public, PKCE), `orders.bff` (client credentials, secret `bff-dev-secret`). Extension methods add the audience mapper, default scopes, and a script mapper that writes the `authorization` claim. Test users, email already verified, temporary passwords: `alice` / `Admin123!` (admin), `bob` and `john.manager` / `Manager123!` (manager), `carol.user` / `User12345!` (user), `dave.guest` / `Guest1234!` (guest).
+
+The script mapper needs Keycloak's scripts feature. If that feature is off, the access token still carries `realm_access.roles`, and each API applies the same matrix locally, so a missing permissions claim is 403 rather than 500. `pulumi up` itself was not executed in this workspace (it needs the Keycloak container and the Pulumi CLI). `dotnet build` of `procurement-keycloak.csproj` succeeds.
+
+Duende IdentityServer runs in development without a license key. Do not point it at production traffic.

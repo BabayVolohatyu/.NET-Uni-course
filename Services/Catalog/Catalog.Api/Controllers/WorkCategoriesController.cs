@@ -1,4 +1,5 @@
 using Catalog.Bll.DTOs;
+using Microsoft.AspNetCore.Authorization;
 using Catalog.Bll.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,6 +10,7 @@ namespace Catalog.Api.Controllers;
 /// Reference data is seeded via migrations and is read-only through this controller.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/work-categories")]
 [Produces("application/json")]
 public sealed class WorkCategoriesController(IWorkCategoryService service) : ControllerBase
