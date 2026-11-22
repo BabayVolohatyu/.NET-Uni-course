@@ -84,10 +84,12 @@ var payments = builder.AddProject<Projects.Payments_Api>("payments-api")
     .WithReference(keycloak).WaitFor(keycloak)
     .WithHttpHealthCheck("/health");
 
-// Gateway already publishes port 5000, so IdentityServer is fixed on 5100.
+// Gateway already publishes port 5000. IdentityServer listens on 5100 via its
+// launch profile (applicationUrl). Do not call WithHttpEndpoint(name: "http"):
+// AddProject already creates that endpoint from launchSettings, and a second
+// endpoint with the same name stops the Aspire manifest publisher (aspirate).
 var identityServer = builder.AddProject<Projects.Platform_IdentityServer>("identityserver")
     .WithReference(identityServerDb).WaitFor(identityServerDb)
-    .WithHttpEndpoint(port: 5100, name: "http")
     .WithHttpHealthCheck("/health");
 
 // ── Aggregator (Lab 06: Redis for caching aggregated responses) ───────────────
@@ -104,10 +106,11 @@ var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
     .WithHttpHealthCheck("/health");
 
 // ── API Gateway (YARP) ────────────────────────────────────────────────────────
-// Fixed port 5000 for convenient development — clients always connect to localhost:5000.
+// Fixed port 5000 comes from Platform.ApiGateway/Properties/launchSettings.json
+// (profile "http"). An extra WithHttpEndpoint(name: "http") would collide with
+// that profile, and a differently named endpoint is invisible to WithHttpHealthCheck.
 // Gateway must start last: it depends on Aggregator being healthy, not merely started.
 builder.AddProject<Projects.Platform_ApiGateway>("gateway")
-    .WithHttpEndpoint(port: 5000, name: "public")
     .WithReference(tenders)
     .WithReference(catalog)
     .WithReference(riskAssessments)

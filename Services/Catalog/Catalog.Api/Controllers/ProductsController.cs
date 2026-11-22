@@ -10,6 +10,7 @@ namespace Catalog.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("products")]
+[Route("api/products")]
 [Produces("application/json")]
 public sealed class ProductsController : ControllerBase
 {

@@ -1,0 +1,18 @@
+{
+    "projectPath":  ".",
+    "outputPath":  "aspirate-output",
+    "containerRegistry":  "localhost:5001",
+    "containerImageTags":  [
+                               "latest"
+                           ],
+    "imagePullPolicy":  "IfNotPresent",
+    "containerBuilder":  "docker",
+    "outputFormat":  "kustomize",
+    "parameters":  [
+
+                   ],
+    "disableSecrets":  true,
+    "privateRegistryEmail":  "aspir8@aka.ms",
+    "includeDashboard":  false,
+    "useCustomNamespace":  true
+}

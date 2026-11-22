@@ -974,3 +974,42 @@ The project declares realm `DevRealmDrivers` (registration, password reset, reme
 The script mapper needs Keycloak's scripts feature. If that feature is off, the access token still carries `realm_access.roles`, and each API applies the same matrix locally, so a missing permissions claim is 403 rather than 500. `pulumi up` itself was not executed in this workspace (it needs the Keycloak container and the Pulumi CLI). `dotnet build` of `procurement-keycloak.csproj` succeeds.
 
 Duende IdentityServer runs in development without a license key. Do not point it at production traffic.
+
+---
+
+## Lab 10 — Kubernetes (Aspirate and manual manifests)
+
+Two ways to run the same platform. They are alternatives: destroy one before applying the other. Passwords are not committed. `Platform.AppHost/manifest.json` keeps Aspire placeholders such as `{sql-password.value}`. Generated ConfigMap literals that contained SA, MongoDB, Redis, RabbitMQ, and Keycloak passwords were removed; workloads read those values from Secrets created with `kubectl`.
+
+| Handout name | This platform |
+|--------------|----------------|
+| orders-api | `tenders-api` |
+| catalog-api, `/api/products` | `catalog-api` (contractor registry and work packages) |
+| reviews-api | `risk-assessments-api` |
+| gateway | `Platform.ApiGateway` |
+
+`/health/live` and `/health/ready` are mapped by `MapDefaultEndpoints` in every environment, including Production, so the Kubernetes probes are the Lab 07 checks.
+
+### Aspirate
+
+From `Platform.AppHost` (needs the `aspirate` 9.1.0 tool):
+
+```powershell
+kubectl config use-context docker-desktop
+aspirate generate --non-interactive --disable-secrets --skip-build --image-pull-policy IfNotPresent --include-dashboard false
+kubectl apply -k Platform.AppHost/aspirate-output
+```
+
+The committed tree was produced with `--skip-build`, so images are not pushed. A real apply needs a registry on `localhost:5001` and `aspirate generate` without `--skip-build`, then the same secret split described in [`deploy/k8s/README.md`](deploy/k8s/README.md). Create the Secrets listed there before apply. `aspirate destroy` removes the release.
+
+### Manual manifests
+
+Build `catalog-api:v1` and `gateway:v1`, create Secrets, apply `deploy/k8s/`. Full commands, the port-forward to `http://localhost:8080/api/products`, and the difference from Aspirate are in [`deploy/k8s/README.md`](deploy/k8s/README.md).
+
+```powershell
+docker build -t catalog-api:v1 -f Services/Catalog/Catalog.Api/Dockerfile .
+docker build -t gateway:v1 -f Platform.ApiGateway/Dockerfile .
+kubectl port-forward service/gateway 8080:80
+```
+
+Gateway and catalog-api run two replicas. Liveness is `/health/live` (process only). Readiness is `/health/ready` (SQL down → 503 and the pod leaves the Service; Redis down → HTTP 200 with `redis-cache` Degraded). `imagePullPolicy: IfNotPresent` uses the locally built image. Service `catalog-api` is ClusterIP port 80, target port 8080, DNS name `catalog-api`.

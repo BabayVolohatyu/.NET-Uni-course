@@ -1,0 +1,45 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenders-api
+  labels:
+    app: tenders-api
+spec:
+  minReadySeconds: 60
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tenders-api
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: tenders-api
+    spec:
+      containers:
+      - name: tenders-api
+        image: localhost:5001/tenders-api:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: https
+          containerPort: 8443
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          periodSeconds: 10
+        envFrom:
+        - configMapRef:
+            name: tenders-api-env
+        - secretRef:
+            name: tenders-secrets
+      terminationGracePeriodSeconds: 180
