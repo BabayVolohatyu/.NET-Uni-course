@@ -195,4 +195,26 @@ db.createCollection("discussions");
 db.discussions.createIndex({ auditNoteId: 1 }, { name: "IX_discussions_auditNoteId" });
 
 print("Collection 'discussions' created.");
+
+// ============================================================
+// COLLECTION 5: processedEvents  (Lab 08 — consumer idempotency)
+// Unique EventId so a redelivered catalog event is applied once.
+// Written in the same MongoDB transaction as the contractorName update
+// when the server is a replica set; otherwise the handler compensates.
+// ============================================================
+db.createCollection("processedEvents");
+db.processedEvents.createIndex(
+  { eventId: 1 },
+  { unique: true, name: "UX_processedEvents_eventId" }
+);
+
+// Last catalog event applied per contractor — skips a late event that would
+// overwrite a newer contractorName.
+db.createCollection("catalogSyncState");
+db.catalogSyncState.createIndex(
+  { contractorId: 1 },
+  { unique: true, name: "UX_catalogSyncState_contractorId" }
+);
+
+print("Collection 'processedEvents' created.");
 print("All collections created successfully.");

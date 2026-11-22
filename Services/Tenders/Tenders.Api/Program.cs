@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Hosting;
+using Platform.EventBus;
+using Tenders.Api.IntegrationEvents;
 using Serilog;
 using Tenders.Api.Grpc;
 using Tenders.Api.HealthChecks;
@@ -20,6 +22,18 @@ var builder = WebApplication.CreateBuilder(args);
 // health checks, service discovery, and resilient HttpClient defaults.
 // ⚠️ Must come before any other configuration that depends on ILogger.
 builder.AddServiceDefaults();
+
+// Lab 08: Aspire.RabbitMQ.Client registers a singleton IConnection, health check, and telemetry.
+builder.AddRabbitMQClient("messaging");
+builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
+builder.Services.AddSingleton<ICorrelationContext, HttpCorrelationContext>();
+builder.Services.AddHostedService<MessagingTopologyHostedService>();
+builder.Services.AddHostedService<CatalogEventsConsumer>();
+builder.Services.AddScoped<LocalContractorSync>();
+builder.Services.AddScoped<ContractorRenamedHandler>();
+builder.Services.AddScoped<ContractorCapitalChangedHandler>();
+builder.Services.AddScoped<ContractorRegisteredHandler>();
+builder.Services.AddScoped<ContractorRemovedHandler>();
 
 // ── Lab 06: Local in-memory caching ──────────────────────────────────────────
 // SizeLimit=10_000 prevents unbounded memory growth.
@@ -50,6 +64,7 @@ var connectionString = builder.Configuration.GetConnectionString("ProcurementBid
 // ── Dependency injection ───────────────────────────────────────────────────────
 // UnitOfWork: Scoped — one connection per HTTP request
 builder.Services.AddScoped<IUnitOfWork>(_ => new UnitOfWork(connectionString));
+builder.Services.AddSingleton(new BiddingMessagingSchema(connectionString));
 
 // BLL services: Scoped (they depend on IUnitOfWork which is Scoped)
 // Lab 06: TenderCacheService decorates TenderService with two-level caching.
@@ -106,6 +121,8 @@ builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
 // ── Build ──────────────────────────────────────────────────────────────────────
 var app = builder.Build();
+
+await app.Services.GetRequiredService<BiddingMessagingSchema>().EnsureAsync();
 
 // ── Middleware pipeline ────────────────────────────────────────────────────────
 app.UseExceptionHandler();   // activates DomainExceptionHandler for all unhandled exceptions

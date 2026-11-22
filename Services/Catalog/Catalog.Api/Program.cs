@@ -1,4 +1,5 @@
 using Catalog.Api.Grpc;
+using Platform.EventBus;
 using Catalog.Api.HealthChecks;
 using Catalog.Api.Metrics;
 using Catalog.Api.Middleware;
@@ -24,6 +25,12 @@ var builder = WebApplication.CreateBuilder(args);
 // (tracing + metrics for ASP.NET Core, HttpClient, SQL Server via EF Core),
 // CorrelationId, health checks, service discovery, and resilient HttpClient defaults.
 builder.AddServiceDefaults();
+
+// Lab 08: Aspire.RabbitMQ.Client registers a singleton IConnection, health check, and telemetry.
+builder.AddRabbitMQClient("messaging");
+builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
+builder.Services.AddSingleton<ICorrelationContext, HttpCorrelationContext>();
+builder.Services.AddHostedService<MessagingTopologyHostedService>();
 
 // ── Lab 06: Local in-memory caching ──────────────────────────────────────────
 // SizeLimit=10_000 prevents unbounded memory growth (units = cache entry Size values).

@@ -2,6 +2,7 @@ using System.Data;
 using System.Diagnostics;
 using AutoMapper;
 using Microsoft.Extensions.Logging;
+using Platform.EventBus;
 using Tenders.Bll.Dtos;
 using Tenders.Bll.Interfaces;
 using Tenders.Dal.Interfaces;
@@ -28,12 +29,21 @@ public sealed class TenderService : ITenderService
     private readonly IUnitOfWork _uow;
     private readonly IMapper _mapper;
     private readonly ILogger<TenderService> _logger;
+    private readonly IEventPublisher _publisher;
+    private readonly ICorrelationContext _correlation;
 
-    public TenderService(IUnitOfWork uow, IMapper mapper, ILogger<TenderService> logger)
+    public TenderService(
+        IUnitOfWork uow,
+        IMapper mapper,
+        ILogger<TenderService> logger,
+        IEventPublisher publisher,
+        ICorrelationContext correlation)
     {
         _uow = uow;
         _mapper = mapper;
         _logger = logger;
+        _publisher = publisher;
+        _correlation = correlation;
     }
 
     // ── ProcuringEntity ─────────────────────────────────────────────────────────
@@ -161,12 +171,27 @@ public sealed class TenderService : ITenderService
         activity?.SetTag("tender.new_status", newStatus);
         activity?.SetTag("tender.change_reason", reason ?? "not provided");
 
+        var tender = await _uow.Tenders.GetByIdAsync(tenderId, ct)
+            ?? throw new NotFoundException($"Tender {tenderId} was not found.");
+        var oldStatus = tender.Status;
+        var title = tender.Title;
+
         await _uow.Tenders.ChangeStatusAsync(tenderId, newStatus, reason: reason, ct: ct);
+
+        // The stored procedure has committed. Publish only after that succeeds.
+        await _publisher.PublishAsync(
+            new TenderStatusChangedEvent(tenderId, title, oldStatus, newStatus, reason)
+            {
+                CorrelationId = _correlation.Current
+            },
+            MessagingTopology.TendersExchange,
+            MessagingTopology.TenderStatusRoutingKey,
+            ct);
 
         // Structured business event log — auditors can search by TenderId and Status
         _logger.LogInformation(
-            "Tender status changed: TenderId={TenderId} NewStatus={NewStatus} Reason={Reason}",
-            tenderId, newStatus, reason ?? "");
+            "Tender status changed: TenderId={TenderId} OldStatus={OldStatus} NewStatus={NewStatus} Reason={Reason} CorrelationId={CorrelationId}",
+            tenderId, oldStatus, newStatus, reason ?? "", _correlation.Current);
     }
 
     public async Task<IReadOnlyList<TenderStatusHistoryDto>> GetStatusHistoryAsync(

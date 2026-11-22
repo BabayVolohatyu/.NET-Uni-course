@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Tenders.Bll\Tenders.Bll.csproj" />
     <!-- Lab 05: shared platform defaults (Serilog, OTel, CorrelationId, health checks) -->
     <ProjectReference Include="..\..\..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -13,6 +14,8 @@
     <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <!-- Lab 06: Redis distributed caching via Aspire integration -->
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="9.3.0" />
+    <PackageReference Include="Aspire.RabbitMQ.Client" Version="9.3.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
     <!-- Lab 06: in-memory caching -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.5" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />

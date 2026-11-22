@@ -97,16 +97,34 @@ GO
 -- Name & EDRPOU are denormalized snapshot fields; kept up-to-date via domain events from Registry.
 -- ============================================================
 CREATE TABLE dbo.Contractors (
-    Id              BIGINT PRIMARY KEY,                 -- same Id as Registry DB; no FOREIGN KEY constraint
-    Name            NVARCHAR(300) NOT NULL,             -- denormalized from Registry (updated by events)
-    EDRPOU          CHAR(8)       NOT NULL,             -- denormalized from Registry (updated by events)
+    Id                  BIGINT PRIMARY KEY,             -- same Id as Registry DB; no FOREIGN KEY constraint
+    Name                NVARCHAR(300) NOT NULL,         -- denormalized from Registry (updated by events)
+    EDRPOU              CHAR(8)       NOT NULL,         -- denormalized from Registry (updated by events)
+    -- Lab 08: event-updated copy of authorized capital. Bids.ProposedPrice is NOT this column.
+    AuthorizedCapital   DECIMAL(18,2) NULL,
+    -- Lab 08: per-field timestamps so a capital event cannot drop an older rename (and the reverse).
+    LastNameEventAt     DATETIME2     NULL,
+    LastCapitalEventAt  DATETIME2     NULL,
     -- audit
-    CreatedAt       DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
-    UpdatedAt       DATETIME2     NULL
+    CreatedAt           DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
+    UpdatedAt           DATETIME2     NULL
 );
 GO
 -- Index: "look up local contractor snapshot by EDRPOU when receiving Registry events"
 CREATE INDEX IX_Contractors_EDRPOU ON dbo.Contractors (EDRPOU);
+GO
+
+-- ============================================================
+-- TABLE: ProcessedEvents  (Lab 08 — consumer idempotency)
+-- RabbitMQ delivers at least once. EventId is the primary key so the same
+-- catalog event cannot change the local contractor directory twice.
+-- The insert runs in the same transaction as the directory update.
+-- ============================================================
+CREATE TABLE dbo.ProcessedEvents (
+    EventId     UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    EventType   NVARCHAR(200)    NOT NULL,
+    ProcessedAt DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME()
+);
 GO
 
 -- ============================================================

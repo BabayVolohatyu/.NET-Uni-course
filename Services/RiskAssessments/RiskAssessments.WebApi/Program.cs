@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Hosting;
+using Platform.EventBus;
+using RiskAssessments.WebApi.IntegrationEvents;
 using RiskAssessments.Application;
 using RiskAssessments.Application.Caching;
 using RiskAssessments.Application.Common.Interfaces;
@@ -20,6 +22,18 @@ var builder = WebApplication.CreateBuilder(args);
 // (tracing + metrics for ASP.NET Core, HttpClient, MongoDB via DiagnosticSources),
 // CorrelationId, health checks, service discovery, and resilient HttpClient defaults.
 builder.AddServiceDefaults();
+
+// Lab 08: Aspire.RabbitMQ.Client registers a singleton IConnection, health check, and telemetry.
+builder.AddRabbitMQClient("messaging");
+builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
+builder.Services.AddSingleton<ICorrelationContext, HttpCorrelationContext>();
+builder.Services.AddHostedService<MessagingTopologyHostedService>();
+builder.Services.AddHostedService<CatalogEventsConsumer>();
+builder.Services.AddScoped<RiskCatalogSync>();
+builder.Services.AddScoped<ContractorRenamedHandler>();
+builder.Services.AddScoped<ContractorCapitalChangedHandler>();
+builder.Services.AddScoped<ContractorRegisteredHandler>();
+builder.Services.AddScoped<ContractorRemovedHandler>();
 
 // ── Lab 06: Local in-memory caching ──────────────────────────────────────────
 builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);

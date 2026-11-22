@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Platform.EventBus;
 using RiskAssessments.Domain.Entities;
 using RiskAssessments.Domain.Enums;
 using RiskAssessments.Domain.Interfaces;
@@ -10,6 +11,8 @@ namespace RiskAssessments.Application.RiskAssessments.Commands.CreateRiskAssessm
 
 public sealed class CreateRiskAssessmentCommandHandler(
     IRiskAssessmentRepository assessments,
+    IEventPublisher publisher,
+    ICorrelationContext correlation,
     ILogger<CreateRiskAssessmentCommandHandler> logger)
     : IRequestHandler<CreateRiskAssessmentCommand, string>
 {
@@ -44,6 +47,22 @@ public sealed class CreateRiskAssessmentCommandHandler(
         await assessments.AddAsync(assessment, ct);
 
         activity?.SetTag("assessment.id", assessment.Id.ToString());
+
+        // The document is stored. Publish only after that insert succeeds.
+        await publisher.PublishAsync(
+            new RiskAssessmentRecordedEvent(
+                assessment.Id.ToString(),
+                cmd.TenderId,
+                cmd.TenderTitle,
+                cmd.RiskLevel,
+                cmd.OverallRiskScore,
+                cmd.ProcuringEntityId)
+            {
+                CorrelationId = correlation.Current
+            },
+            MessagingTopology.RiskAssessmentsExchange,
+            MessagingTopology.AssessmentRecordedRoutingKey,
+            ct);
 
         // Structured business event log — auditors track risk assessment creation by TenderId and RiskLevel
         logger.LogInformation(

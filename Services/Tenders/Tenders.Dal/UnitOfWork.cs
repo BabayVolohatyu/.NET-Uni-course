@@ -33,12 +33,14 @@ public sealed class UnitOfWork : IUnitOfWork
         Tenders           = new TenderRepository(_connection, () => _transaction);
         Bids              = new BidRepository(_connection, () => _transaction);
         Contractors       = new ContractorRepository(_connection, () => _transaction);
+        ProcessedEvents   = new ProcessedEventStore(_connection, () => _transaction);
     }
 
     public IProcuringEntityRepository ProcuringEntities { get; }
     public ITenderRepository Tenders { get; }
     public IBidRepository Bids { get; }
     public IContractorRepository Contractors { get; }
+    public IProcessedEventStore ProcessedEvents { get; }
 
     /// <summary>
     /// Opens the shared connection (if not yet open) and begins a transaction with the given isolation level.

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RiskAssessments.Domain\RiskAssessments.Domain.csproj" />
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
   </ItemGroup>
 
   <ItemGroup>

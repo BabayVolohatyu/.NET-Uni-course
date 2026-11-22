@@ -7,6 +7,7 @@ using Catalog.Dal.Interfaces;
 using Catalog.Domain.Exceptions;
 using Catalog.Domain.Models;
 using Microsoft.Extensions.Logging;
+using Platform.EventBus;
 using System.Diagnostics;
 
 namespace Catalog.Bll.Services;
@@ -30,12 +31,21 @@ public sealed class ContractorService : IContractorService
     private readonly IUnitOfWork _uow;
     private readonly IMapper _mapper;
     private readonly ILogger<ContractorService> _logger;
+    private readonly IEventPublisher _publisher;
+    private readonly ICorrelationContext _correlation;
 
-    public ContractorService(IUnitOfWork uow, IMapper mapper, ILogger<ContractorService> logger)
+    public ContractorService(
+        IUnitOfWork uow,
+        IMapper mapper,
+        ILogger<ContractorService> logger,
+        IEventPublisher publisher,
+        ICorrelationContext correlation)
     {
         _uow = uow;
         _mapper = mapper;
         _logger = logger;
+        _publisher = publisher;
+        _correlation = correlation;
     }
 
     // ── List (paged) ─────────────────────────────────────────────────────────────
@@ -82,9 +92,18 @@ public sealed class ContractorService : IContractorService
             input.Name, input.EDRPOU, input.AuthorizedCapital, input.RegistrationDate);
 
         await _uow.Contractors.AddAsync(contractor, ct);
-        await _uow.SaveChangesAsync(ct);    // flush to get the generated Id
+        await _uow.SaveChangesAsync(ct);    // 1) row is committed — only then publish
 
         activity?.SetTag("contractor.id", contractor.Id);
+
+        await _publisher.PublishAsync(
+            new ContractorRegisteredEvent(contractor.Id, contractor.Name, contractor.EDRPOU, contractor.AuthorizedCapital)
+            {
+                CorrelationId = _correlation.Current
+            },
+            MessagingTopology.CatalogExchange,
+            MessagingTopology.RegisteredRoutingKey,
+            ct);
 
         // Structured business event log — no sensitive data (no passport numbers, contacts)
         _logger.LogInformation(
@@ -103,14 +122,51 @@ public sealed class ContractorService : IContractorService
         var contractor = await _uow.Contractors.GetByIdAsync(id, ct)
             ?? throw new NotFoundException(nameof(Contractor), id);
 
+        var oldName = contractor.Name;
+        var oldCapital = contractor.AuthorizedCapital;
+        var nameChanged = !string.Equals(oldName, input.Name, StringComparison.Ordinal);
+        var capitalChanged = oldCapital != input.AuthorizedCapital;
+
         // Domain methods enforce invariants
-        contractor.Rename(input.Name);
-        contractor.UpdateCapital(input.AuthorizedCapital);
+        if (nameChanged)
+            contractor.Rename(input.Name);
+        if (capitalChanged)
+            contractor.UpdateCapital(input.AuthorizedCapital);
+
+        if (!nameChanged && !capitalChanged)
+            return _mapper.Map<ContractorDto>(contractor);
 
         _uow.Contractors.Update(contractor);
-        await _uow.SaveChangesAsync(ct);
+        await _uow.SaveChangesAsync(ct);    // 1) committed. A failed save never reaches PublishAsync.
 
-        _logger.LogInformation("Contractor updated: Id={Id}", id);
+        if (nameChanged)
+        {
+            await _publisher.PublishAsync(
+                new ContractorRenamedEvent(contractor.Id, oldName, contractor.Name, contractor.EDRPOU)
+                {
+                    CorrelationId = _correlation.Current
+                },
+                MessagingTopology.CatalogExchange,
+                MessagingTopology.RenamedRoutingKey,
+                ct);
+        }
+
+        if (capitalChanged)
+        {
+            await _publisher.PublishAsync(
+                new ContractorCapitalChangedEvent(
+                    contractor.Id, contractor.Name, contractor.EDRPOU, oldCapital, contractor.AuthorizedCapital)
+                {
+                    CorrelationId = _correlation.Current
+                },
+                MessagingTopology.CatalogExchange,
+                MessagingTopology.CapitalChangedRoutingKey,
+                ct);
+        }
+
+        _logger.LogInformation(
+            "Contractor updated: ContractorId={ContractorId} NameChanged={NameChanged} CapitalChanged={CapitalChanged} CorrelationId={CorrelationId}",
+            id, nameChanged, capitalChanged, _correlation.Current);
         return _mapper.Map<ContractorDto>(contractor);
     }
 
@@ -120,10 +176,24 @@ public sealed class ContractorService : IContractorService
         var contractor = await _uow.Contractors.GetByIdAsync(id, ct)
             ?? throw new NotFoundException(nameof(Contractor), id);
 
+        var name = contractor.Name;
+        var edrpou = contractor.EDRPOU;
+
         _uow.Contractors.Delete(contractor);
         await _uow.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Contractor deleted: Id={Id}", id);
+        await _publisher.PublishAsync(
+            new ContractorRemovedEvent(id, name, edrpou)
+            {
+                CorrelationId = _correlation.Current
+            },
+            MessagingTopology.CatalogExchange,
+            MessagingTopology.RemovedRoutingKey,
+            ct);
+
+        _logger.LogInformation(
+            "Contractor deleted: ContractorId={ContractorId} CorrelationId={CorrelationId}",
+            id, _correlation.Current);
     }
 
     // ── Activate / Deactivate ────────────────────────────────────────────────────

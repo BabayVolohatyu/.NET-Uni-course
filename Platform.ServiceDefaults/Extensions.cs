@@ -109,6 +109,8 @@ public static class Extensions
             .WithTracing(tracing => tracing
                 // Own spans from each service (created with ActivitySource)
                 .AddSource(builder.Environment.ApplicationName)
+                // Lab 08: consumer/publisher spans that cross RabbitMQ (W3C traceparent).
+                .AddSource("Platform.Messaging")
                 // MongoDB Driver spans (Lab 04 — RiskAssessments)
                 .AddSource("MongoDB.Driver.Core.Extensions.DiagnosticSources")
                 // Instrumentation for incoming HTTP requests (ASP.NET Core) — also covers gRPC server spans

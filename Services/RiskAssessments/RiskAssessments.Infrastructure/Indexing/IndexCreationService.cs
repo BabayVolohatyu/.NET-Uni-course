@@ -54,6 +54,20 @@ public sealed class IndexCreationService(MongoDbContext context) : IIndexCreatio
                 new CreateIndexOptions { Name = "IX_auditNotes_text" })
         ], ct);
 
+        var processed = context.Database.GetCollection<BsonDocument>("processedEvents");
+        await processed.Indexes.CreateOneAsync(
+            new CreateIndexModel<BsonDocument>(
+                Builders<BsonDocument>.IndexKeys.Ascending("eventId"),
+                new CreateIndexOptions { Unique = true, Name = "UX_processedEvents_eventId" }),
+            cancellationToken: ct);
+
+        var syncState = context.Database.GetCollection<BsonDocument>("catalogSyncState");
+        await syncState.Indexes.CreateOneAsync(
+            new CreateIndexModel<BsonDocument>(
+                Builders<BsonDocument>.IndexKeys.Ascending("contractorId"),
+                new CreateIndexOptions { Unique = true, Name = "UX_catalogSyncState_contractorId" }),
+            cancellationToken: ct);
+
         var ruleKeys = Builders<BsonDocument>.IndexKeys;
         await context.AnomalyRules.Indexes.CreateManyAsync(
         [

@@ -12,6 +12,7 @@ public interface IUnitOfWork : IAsyncDisposable
     ITenderRepository Tenders { get; }
     IBidRepository Bids { get; }
     IContractorRepository Contractors { get; }
+    IProcessedEventStore ProcessedEvents { get; }
 
     /// <summary>Opens the connection and begins a transaction with the specified isolation level.</summary>
     Task BeginTransactionAsync(IsolationLevel level = IsolationLevel.ReadCommitted, CancellationToken ct = default);

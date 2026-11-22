@@ -15,6 +15,18 @@ public class Contractor
     /// <summary>Ukrainian 8-digit business code (denormalised from Registry).</summary>
     public string EDRPOU { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Event-updated copy of registry authorized capital.
+    /// Bid prices (<c>Bids.ProposedPrice</c>) are a different column and are not updated from events.
+    /// </summary>
+    public decimal? AuthorizedCapital { get; set; }
+
+    /// <summary>OccurredAt of the last rename applied to this row.</summary>
+    public DateTime? LastNameEventAt { get; set; }
+
+    /// <summary>OccurredAt of the last capital change applied to this row.</summary>
+    public DateTime? LastCapitalEventAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }

@@ -90,6 +90,8 @@ public static class MongoMappings
         {
             IgnoreIfNull(cm, nameof(TriggeredFlag.AffectedField));
             IgnoreIfNull(cm, nameof(TriggeredFlag.ContractorId));
+            IgnoreIfNull(cm, nameof(TriggeredFlag.ContractorName));
+            IgnoreIfNull(cm, nameof(TriggeredFlag.ContractorActive));
             IgnoreIfNull(cm, nameof(TriggeredFlag.CompanyAgeDays));
             IgnoreIfNull(cm, nameof(TriggeredFlag.AuthorizedCapital));
         });

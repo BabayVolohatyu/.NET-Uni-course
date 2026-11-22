@@ -47,7 +47,8 @@ public sealed class RiskAssessmentSeeder(MongoDbContext context) : IDataSeeder
             affectedField: "contractor.registrationDate",
             contractorId: 101,
             companyAgeDays: 320,
-            authorizedCapital: 10_000m));
+            authorizedCapital: 10_000m,
+            contractorName: "ТОВ «БудМайстер»"));
 
         await context.RiskAssessments.InsertManyAsync([school, heating], cancellationToken: ct);
     }

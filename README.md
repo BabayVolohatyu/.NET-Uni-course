@@ -46,8 +46,10 @@ No FOREIGN KEY constraint is created between databases. Each duplicated field be
 |-----------------|-----------|----------------|--------------------|
 | `Bids.ContractorName` | `ProcurementBidding` DB (P1) | `Contractor` in `ContractorRegistry` (P2) | **Snapshot** — fixed at bid submission time, never updated. Reflects the contractor's name as known when the bid was placed (same principle as `OrderItem.ProductName` in Microsoft eShop). |
 | `Bids.ContractorEDRPOU` | `ProcurementBidding` DB (P1) | `Contractor` in `ContractorRegistry` (P2) | **Snapshot** — fixed at bid submission time. |
-| `Contractors.Name` *(local copy)* | `ProcurementBidding` DB (P1) | `Contractor` in `ContractorRegistry` (P2) | **Event-updated copy** — updated when Registry publishes a `ContractorNameChanged` event (eventual consistency via messaging, implemented in Lab 08). |
-| `Contractors.EDRPOU` *(local copy)* | `ProcurementBidding` DB (P1) | `Contractor` in `ContractorRegistry` (P2) | **Event-updated copy** — same event as above. |
+| `Contractors.Name` *(local copy)* | `ProcurementBidding` DB (P1) | `Contractor` in `ContractorRegistry` (P2) | **Event-updated copy** — `ContractorRenamedEvent` on exchange `catalog-events` (Lab 08). `Bids.ContractorName` is not updated. |
+| `Contractors.EDRPOU` *(local copy)* | `ProcurementBidding` DB (P1) | `Contractor` in `ContractorRegistry` (P2) | **Event-updated copy** — carried on the same rename/register events. EDRPOU itself is immutable in the registry. |
+| `Contractors.AuthorizedCapital` *(local copy)* | `ProcurementBidding` DB (P1) | `Contractor.AuthorizedCapital` in `ContractorRegistry` (P2) | **Event-updated copy** — `ContractorCapitalChangedEvent`. `Bids.ProposedPrice` stays the price offered at submission. |
+| `triggeredFlags.contractorName` | `RiskAssessment` DB (P3) | `Contractor.Name` in `ContractorRegistry` (P2) | **Event-updated copy** — `ContractorRenamedEvent` rewrites the name on every assessment whose embedded flag references that contractor. `tenderTitle`, `procuringEntityName`, and `triggeredFlags.authorizedCapital` stay snapshots. |
 | `riskAssessments.tenderTitle` | `RiskAssessment` DB (P3) | `Tender` in `ProcurementBidding` (P1) | **Snapshot** — fixed at assessment creation time. The assessment records what was known at evaluation time. |
 | `riskAssessments.procuringEntityName` | `RiskAssessment` DB (P3) | `ProcuringEntity` in `ProcurementBidding` (P1) | **Snapshot** — fixed at assessment creation time. |
 
@@ -783,3 +785,66 @@ curl http://localhost:5000/api/aggregator/tenders/1/full
 ```
 
 Stopping Redis: `/health/ready` JSON shows `redis-cache` as `Degraded` and the APIs still respond from SQL Server or MongoDB. Stopping SQL Server: `/health/live` is 200 and `/health/ready` is 503.
+
+---
+
+## Lab 08 — Event-driven updates (RabbitMQ)
+
+Catalog (the contractor registry) is the owner of contractor name, EDRPOU, and authorized capital. After a change is committed, it publishes a JSON integration event. Tenders and Risk Assessments each have their own queue, so both receive the event (fan-out). Several instances of one service would share that service's queue (competing consumers).
+
+The handout's Orders / Reviews names map to this domain as follows:
+
+| Handout | This platform |
+|---------|----------------|
+| Catalog product price | `Contractor.AuthorizedCapital` |
+| Catalog product rename | `Contractor.Name` |
+| Orders local `Products` row | `ProcurementBidding.dbo.Contractors` |
+| `OrderItems.UnitPrice` snapshot | `Bids.ProposedPrice`, `Bids.ContractorName`, `Bids.ContractorEDRPOU` — never rewritten |
+| Reviews `productName` | `triggeredFlags.contractorName` on every assessment that embeds that contractor |
+| `orders.catalog-sync` | `tenders.catalog-sync` |
+| `reviews.catalog-sync` | `risk-assessments.catalog-sync` |
+
+`tenderTitle` and `procuringEntityName` stay snapshots taken when the assessment was created. Flag `authorizedCapital` stays the capital observed when the rule fired.
+
+### Topology
+
+Declared in code at startup (`Platform.EventBus/MessagingTopology.cs`). Declaring it again is safe.
+
+| Object | Name | Role |
+|--------|------|------|
+| Topic exchange | `catalog-events` | Catalog publishes `contractor.registered`, `contractor.renamed`, `contractor.capital_changed`, `contractor.removed` |
+| Queue | `tenders.catalog-sync` | Binding `contractor.*`, dead-letters to `catalog-events.dlx` |
+| Queue | `tenders.catalog-sync.dlq` | Bound to that fanout DLX |
+| Queue | `risk-assessments.catalog-sync` | Same binding, its own DLX `risk-assessments.catalog-sync.dlx` and DLQ |
+| Topic exchange | `tenders-events` | `tender.status_changed` after `usp_ChangeTenderStatus` commits |
+| Topic exchange | `risk-assessments-events` | `assessment.recorded` after the MongoDB insert |
+
+Messages are persistent. `MessageId` is the event `EventId`. Header `x-correlation-id` is the Lab 05 business correlation id. W3C `traceparent` is injected from the current `Activity`, and the consumer starts a child span of kind Consumer (`Platform.Messaging`, registered in ServiceDefaults). One Aspire trace therefore runs HTTP → publish → consume → SQL or MongoDB.
+
+### Idempotency and failures
+
+RabbitMQ delivers at least once. Each consumer stores `EventId` before it changes its own data:
+
+- Tenders: `dbo.ProcessedEvents` (primary key) in the same SQL transaction as the directory update. Older events for the same field are ignored via `LastNameEventAt` / `LastCapitalEventAt`.
+- Risk assessments: collection `processedEvents` (unique `eventId`) in a MongoDB transaction together with the `contractorName` update. On a standalone MongoDB node, a failed update deletes the processed-event row so the retry can run again.
+
+A duplicate `EventId` is logged and skipped. Invalid JSON, an unknown event type, or `schemaVersion` other than 1 is nacked with `requeue: false` and lands in that service's DLQ. A transient failure (database down, timeout) is republished with header `x-retry-count` and the original delivery is acked — `requeue: true` cannot change headers. After 3 retries the message is dead-lettered.
+
+There is a crash window between the database commit and the publish. A transactional outbox would close it; this lab does not implement one. If the broker is down, the API call fails after the row is already saved.
+
+### Run
+
+RabbitMQ is started by Aspire, not by `docker-compose.yml` (that file is still SQL Server and MongoDB only).
+
+```powershell
+cd Platform.AppHost
+dotnet user-secrets set "sql-password" "YourStrong!Passw0rd"
+cd ..
+dotnet run --project Platform.AppHost
+```
+
+In the Aspire dashboard, open the RabbitMQ management endpoint (container port 15672). Confirm exchange `catalog-events`, queues `tenders.catalog-sync` and `risk-assessments.catalog-sync`, their bindings, and the DLQs.
+
+The local contractor id is the registry id. The seeded shell-company flag references contractor `101`. Renaming that registry contractor updates `dbo.Contractors` in ProcurementBidding and `triggeredFlags.contractorName` on matching assessments. Bids that already name the contractor keep the name and price from submission time.
+
+Publishing the same body again with the same `EventId` (management UI, or a second delivery) does not change the data. A message whose body is not JSON is nacked into the DLQ. Stopping `tenders-api`, changing several capitals, then starting it again drains `tenders.catalog-sync`.

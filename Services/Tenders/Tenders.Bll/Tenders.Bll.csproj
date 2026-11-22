@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Tenders.Domain\Tenders.Domain.csproj" />
     <ProjectReference Include="..\Tenders.Dal\Tenders.Dal.csproj" />
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
   </ItemGroup>
 
   <ItemGroup>

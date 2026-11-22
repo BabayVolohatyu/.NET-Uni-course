@@ -178,6 +178,7 @@ db.riskAssessments.updateOne(
           affectedField: "contractor.registrationDate",
           // Additional field present only on SHELL_COMPANY flag — demonstrates flexible schema
           contractorId:  101,
+          contractorName: "ТОВ «БудМайстер»",
           companyAgeDays: 320,
           authorizedCapital: 10000
         }
