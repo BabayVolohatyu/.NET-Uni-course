@@ -1,0 +1,30 @@
+# Non-secret settings. Passwords and the JWT signing key are not stored here.
+# Create them with the commands in README.md, then reference them with secretRef.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_HTTP_PORTS: "8080"
+  # Double underscore is the environment-variable form of Aspire service discovery
+  # (services:catalog-api:http:0). The value is the ClusterIP Service DNS name.
+  services__catalog-api__http__0: "http://catalog-api"
+  services__tenders-api__http__0: "http://tenders-api"
+  services__risk-assessments-api__http__0: "http://risk-assessments-api"
+  services__aggregator__http__0: "http://aggregator"
+  services__auth-api__http__0: "http://auth-api"
+  services__payments-api__http__0: "http://payments-api"
+  services__keycloak__http__0: "http://keycloak:8080"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-config
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_HTTP_PORTS: "8080"
+  # Redis in this manual slice has no password, so the connection string is not a secret.
+  # A stopped Redis makes /health/ready report Degraded and still return HTTP 200.
+  ConnectionStrings__redis: "redis:6379,abortConnect=false,connectTimeout=1000"
+  services__keycloak__http__0: "http://keycloak:8080"

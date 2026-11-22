@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="9.3.0" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="9.3.0" />
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="9.3.0" />
+    <PackageReference Include="Aspire.Hosting.MongoDB" Version="9.3.0" />
+    <!-- Lab 06: Redis container for distributed caching -->
+    <PackageReference Include="Aspire.Hosting.Redis" Version="9.3.0" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="9.3.0" />
+    <!-- Lab 09: Keycloak container, service discovery, data volume. -->
+    <PackageReference Include="Aspire.Hosting.Keycloak" Version="9.3.1-preview.1.25305.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Microservices from previous labs -->
+    <ProjectReference Include="..\Services\Tenders\Tenders.Api\Tenders.Api.csproj" />
+    <ProjectReference Include="..\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
+    <ProjectReference Include="..\Services\RiskAssessments\RiskAssessments.WebApi\RiskAssessments.WebApi.csproj" />
+    <!-- New platform components -->
+    <ProjectReference Include="..\Platform.ApiGateway\Platform.ApiGateway.csproj" />
+    <ProjectReference Include="..\Platform.Aggregator\Platform.Aggregator.csproj" />
+    <!-- Lab 09 -->
+    <ProjectReference Include="..\Services\Auth\Auth.Api\Auth.Api.csproj" />
+    <ProjectReference Include="..\Services\Payments\Payments.Api\Payments.Api.csproj" />
+    <ProjectReference Include="..\Platform.IdentityServer\Platform.IdentityServer.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,45 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identityserver
+  labels:
+    app: identityserver
+spec:
+  minReadySeconds: 60
+  replicas: 1
+  selector:
+    matchLabels:
+      app: identityserver
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: identityserver
+    spec:
+      containers:
+      - name: identityserver
+        image: localhost:5001/identityserver:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: https
+          containerPort: 8443
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          periodSeconds: 10
+        envFrom:
+        - configMapRef:
+            name: identityserver-env
+        - secretRef:
+            name: identityserver-secrets
+      terminationGracePeriodSeconds: 180

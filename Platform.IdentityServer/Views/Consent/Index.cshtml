@@ -1,0 +1,26 @@
+@model ConsentViewModel
+<section class="card">
+    <h1>Згода на доступ</h1>
+    <p>Клієнт <strong>@Model.ClientName</strong> просить доступ до даних закупівель.</p>
+    <form asp-action="Index" method="post">
+        <input type="hidden" asp-for="ReturnUrl" />
+        <div asp-validation-summary="ModelOnly" class="error"></div>
+        <ul>
+            @foreach (var scope in Model.Scopes)
+            {
+                <li>
+                    <label>
+                        <input type="checkbox" name="ScopesConsented" value="@scope" checked="checked" />
+                        @scope
+                    </label>
+                </li>
+            }
+        </ul>
+        <label>
+            <input asp-for="RememberConsent" />
+            Запам'ятати вибір
+        </label>
+        <button type="submit" name="button" value="yes">Дозволити</button>
+        <button type="submit" name="button" value="no">Відхилити</button>
+    </form>
+</section>

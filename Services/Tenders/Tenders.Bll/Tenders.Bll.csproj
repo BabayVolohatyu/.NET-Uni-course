@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tenders.Domain\Tenders.Domain.csproj" />
+    <ProjectReference Include="..\Tenders.Dal\Tenders.Dal.csproj" />
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" Version="17.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="11.0.0" />
+    <!-- Lab 06: caching abstractions (IMemoryCache, IDistributedCache) — available transitively.
+         IMeterFactory is in System.Diagnostics.Metrics namespace (available in .NET 8+ SDK) -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.21" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

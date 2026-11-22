@@ -1,0 +1,14 @@
+**/.git
+**/.vs
+**/.idea
+**/.cursor
+**/bin
+**/obj
+**/out
+**/publish
+**/*.user
+**/lab-desc
+**/.guidelines
+**/aspirate-output
+**/*.md
+!README.md

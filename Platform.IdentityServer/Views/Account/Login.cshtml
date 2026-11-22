@@ -1,0 +1,22 @@
+@{
+    ViewData["Title"] = "Вхід";
+}
+@model LoginViewModel
+<section class="card">
+    <h1>Вхід аудитора</h1>
+    <p>Платформа оцінки ризиків публічних закупівель відбудови. Authorization Code Flow зупиняється на цій сторінці, перш ніж видати код.</p>
+    <form asp-action="Login" method="post">
+        <input type="hidden" asp-for="ReturnUrl" />
+        <div asp-validation-summary="ModelOnly" class="error"></div>
+        <label>
+            Ім'я користувача
+            <input asp-for="Username" autocomplete="username" />
+        </label>
+        <label>
+            Пароль
+            <input asp-for="Password" type="password" autocomplete="current-password" />
+        </label>
+        <button type="submit">Увійти</button>
+    </form>
+    <p class="hint">Development: <code>auditor.admin</code> / <code>Admin123!</code> або <code>auditor.user</code> / <code>User12345!</code></p>
+</section>

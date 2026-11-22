@@ -1,0 +1,24 @@
+<Solution>
+  <Project Path="Platform.AppHost\Platform.AppHost.csproj" />
+  <Project Path="Platform.EventBus\Platform.EventBus.csproj" />
+  <Project Path="Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
+  <Project Path="Platform.ApiGateway\Platform.ApiGateway.csproj" />
+  <Project Path="Platform.Aggregator\Platform.Aggregator.csproj" />
+  <Project Path="Platform.IdentityServer\Platform.IdentityServer.csproj" />
+  <Project Path="Services\Auth\Auth.Api\Auth.Api.csproj" />
+  <Project Path="Services\Payments\Payments.Api\Payments.Api.csproj" />
+  <Project Path="Services\Payments\Payments.Tests\Payments.Tests.csproj" />
+  <Project Path="infra\keycloak\procurement-keycloak.csproj" />
+  <Project Path="Services\Tenders\Tenders.Api\Tenders.Api.csproj" />
+  <Project Path="Services\Tenders\Tenders.Bll\Tenders.Bll.csproj" />
+  <Project Path="Services\Tenders\Tenders.Dal\Tenders.Dal.csproj" />
+  <Project Path="Services\Tenders\Tenders.Domain\Tenders.Domain.csproj" />
+  <Project Path="Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
+  <Project Path="Services\Catalog\Catalog.Bll\Catalog.Bll.csproj" />
+  <Project Path="Services\Catalog\Catalog.Dal\Catalog.Dal.csproj" />
+  <Project Path="Services\Catalog\Catalog.Domain\Catalog.Domain.csproj" />
+  <Project Path="Services\RiskAssessments\RiskAssessments.WebApi\RiskAssessments.WebApi.csproj" />
+  <Project Path="Services\RiskAssessments\RiskAssessments.Application\RiskAssessments.Application.csproj" />
+  <Project Path="Services\RiskAssessments\RiskAssessments.Infrastructure\RiskAssessments.Infrastructure.csproj" />
+  <Project Path="Services\RiskAssessments\RiskAssessments.Domain\RiskAssessments.Domain.csproj" />
+</Solution>

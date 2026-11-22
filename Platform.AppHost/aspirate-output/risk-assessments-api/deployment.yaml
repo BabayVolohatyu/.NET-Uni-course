@@ -1,0 +1,45 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-assessments-api
+  labels:
+    app: risk-assessments-api
+spec:
+  minReadySeconds: 60
+  replicas: 1
+  selector:
+    matchLabels:
+      app: risk-assessments-api
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: risk-assessments-api
+    spec:
+      containers:
+      - name: risk-assessments-api
+        image: localhost:5001/risk-assessments-api:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: https
+          containerPort: 8443
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+          periodSeconds: 10
+        envFrom:
+        - configMapRef:
+            name: risk-assessments-api-env
+        - secretRef:
+            name: risk-assessments-secrets
+      terminationGracePeriodSeconds: 180

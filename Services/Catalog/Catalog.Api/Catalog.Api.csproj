@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Catalog.Bll\Catalog.Bll.csproj" />
+    <!-- Dal referenced for DbContext injection in Program.cs + EF migrations design-time -->
+    <ProjectReference Include="..\Catalog.Dal\Catalog.Dal.csproj" />
+    <!-- Lab 05: shared platform defaults (Serilog, OTel, CorrelationId, health checks) -->
+    <ProjectReference Include="..\..\..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.70.0" />
+    <PackageReference Include="Grpc.AspNetCore.HealthChecks" Version="2.70.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
+    <!-- Lab 06: Redis distributed caching via Aspire integration -->
+    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="9.3.0" />
+    <PackageReference Include="Aspire.RabbitMQ.Client" Version="9.3.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
+    <!-- Lab 06: in-memory caching -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="11.0.1" />
+    <PackageReference Include="Aspire.Keycloak.Authentication" Version="9.3.1-preview.1.25305.6" />
+  </ItemGroup>
+
+  <!-- Lab 06: gRPC contract — server-side code generation from .proto -->
+  <ItemGroup>
+    <Protobuf Include="Protos\catalog.proto" GrpcServices="Server" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

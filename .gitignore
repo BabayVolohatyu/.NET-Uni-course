@@ -1,0 +1,41 @@
+# ── Local-only: never submit to course platform ───────────────────────────────
+CONTEXT.MD
+CONTEXT.md
+lab-desc/
+.guidelines/
+MASTER_PROMPT.md
+
+# ── .NET build outputs ────────────────────────────────────────────────────────
+[Bb]in/
+[Oo]bj/
+out/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# ── NuGet ─────────────────────────────────────────────────────────────────────
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+# NuGet.Config with credentials — never commit
+nuget.config
+
+# ── Rider / VS / VSCode ───────────────────────────────────────────────────────
+.idea/
+*.DotSettings.user
+.vscode/
+*.code-workspace
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Secrets / env ─────────────────────────────────────────────────────────────
+*.env
+.env
+secrets.json
+appsettings.Local.json

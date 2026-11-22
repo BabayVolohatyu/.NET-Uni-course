@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+option csharp_namespace = "Catalog.Grpc";
+package catalog;
+
+// Internal gRPC API for the Catalog (Contractor Registry) microservice.
+// Used by Platform.Aggregator for high-performance parallel calls over HTTP/2.
+// Field numbers are immutable — changing them breaks binary compatibility with existing clients.
+service ContractorService {
+  // Retrieve a single contractor by its unique identifier.
+  rpc GetContractor (GetContractorRequest) returns (ContractorReply);
+
+  // Retrieve a paged list of contractors with optional active-only filter.
+  rpc GetContractors (GetContractorsRequest) returns (ContractorsReply);
+
+  // Batch-fetch contractors by a set of IDs (used by Aggregator for enrichment).
+  rpc GetContractorsByIds (GetContractorsByIdsRequest) returns (ContractorsReply);
+}
+
+// Request to fetch a single contractor by ID.
+message GetContractorRequest {
+  int32 id = 1; // Contractor primary key
+}
+
+// Request to list contractors with pagination.
+message GetContractorsRequest {
+  int32 page      = 1; // 1-based page number
+  int32 page_size = 2; // items per page; default 20
+  bool  active_only = 3; // if true, return only active contractors
+}
+
+// Request to batch-fetch contractors by IDs.
+message GetContractorsByIdsRequest {
+  repeated int32 ids = 1; // list of contractor primary keys
+}
+
+// Single contractor data transfer object for gRPC responses.
+message ContractorReply {
+  int32  id                 = 1;
+  string name               = 2;
+  string edrpou             = 3;  // ЄДРПОУ — Ukrainian business identifier
+  double authorized_capital = 4;
+  string registration_date  = 5;  // ISO 8601 date string
+  bool   is_active          = 6;
+  string created_at         = 7;  // ISO 8601 datetime string
+}
+
+// Collection of contractors.
+message ContractorsReply {
+  repeated ContractorReply contractors = 1;
+}

@@ -1,0 +1,10 @@
+<section class="card">
+    <h1>IdentityServer платформи ризиків закупівель</h1>
+    <p>Цей сервер видає токени для тендерів (<code>orders_api</code>) і реєстру підрядників (<code>products_api</code>). Користувачі (аудитори) входять через Authorization Code. Aggregator входить через Client Credentials і не отримує ідентифікатор людини.</p>
+    <ul>
+        <li><a href="/.well-known/openid-configuration">Discovery document</a></li>
+        <li>Authorization: <code>/connect/authorize</code></li>
+        <li>Token: <code>/connect/token</code></li>
+    </ul>
+    <p>Клієнти: <code>postman</code> (код + секрет), <code>swagger</code> (публічний клієнт, PKCE обов'язковий), <code>aggregator_service</code> (client credentials).</p>
+</section>

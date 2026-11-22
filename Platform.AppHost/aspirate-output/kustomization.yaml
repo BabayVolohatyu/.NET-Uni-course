@@ -1,0 +1,18 @@
+resources:
+- sql
+- mongo
+- redis
+- messaging
+- identityserver-sql
+- keycloak
+- tenders-api
+- catalog-api
+- risk-assessments-api
+- auth-api
+- payments-api
+- identityserver
+- aggregator
+- gateway
+
+generatorOptions:
+  disableNameSuffixHash: true

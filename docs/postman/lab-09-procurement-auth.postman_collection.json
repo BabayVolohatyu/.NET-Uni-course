@@ -1,0 +1,458 @@
+{
+  "info": {
+    "name": "Lab 09 — procurement auth",
+    "description": "Register/login/refresh, IdentityServer authorization code and client credentials, Keycloak role matrix against /orders, /products and /payments. Base URL is the API gateway.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "gateway", "value": "http://localhost:5000" },
+    { "key": "identityServer", "value": "http://localhost:5100" },
+    { "key": "keycloak", "value": "http://localhost:8080" },
+    { "key": "accessToken", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "emailToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Auth Service (ASP.NET Identity)",
+      "item": [
+        {
+          "name": "Register clerk",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"kyiv.clerk\",\n  \"email\": \"kyiv.clerk@reconstruction-audit.local\",\n  \"password\": \"Clerk123!\",\n  \"displayName\": \"Клерк Києва\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Dev mailbox (confirmation and reset tokens)",
+          "request": { "method": "GET", "url": "{{gateway}}/auth/dev/mailbox" }
+        },
+        {
+          "name": "Verify email",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"token\": \"{{emailToken}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Resend verification",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/resend-verification",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"kyiv.clerk@reconstruction-audit.local\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login auditor.admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.accessToken) pm.collectionVariables.set('accessToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"auditor.admin\",\n  \"password\": \"Admin123!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login auditor.user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.accessToken) pm.collectionVariables.set('accessToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"auditor.user\",\n  \"password\": \"User12345!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Refresh token (cookie)",
+          "request": { "method": "POST", "url": "{{gateway}}/auth/refresh-token" }
+        },
+        {
+          "name": "Revoke refresh token",
+          "request": { "method": "POST", "url": "{{gateway}}/auth/revoke-token" }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": "{{gateway}}/auth/logout" }
+        },
+        {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/forgot-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"auditor.user@procurement.audit\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/reset-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"auditor.user@procurement.audit\",\n  \"token\": \"{{emailToken}}\",\n  \"newPassword\": \"User12346!\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/auth/change-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Admin123!\",\n  \"newPassword\": \"Admin1234!\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Users",
+      "item": [
+        {
+          "name": "List users (Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/users"
+          }
+        },
+        {
+          "name": "Get user (owner or Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/users/{{userId}}"
+          }
+        },
+        {
+          "name": "Update user (owner or Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/users/{{userId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"displayName\": \"Головний аудитор\"\n}" }
+          }
+        },
+        {
+          "name": "Refresh tokens of user (owner or Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/users/{{userId}}/refresh-tokens"
+          }
+        },
+        {
+          "name": "Roles of user (any authenticated)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/users/{{userId}}/roles"
+          }
+        },
+        {
+          "name": "Assign role (Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/users/{{userId}}/roles",
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"Admin\"\n}" }
+          }
+        },
+        {
+          "name": "Remove role (Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{gateway}}/users/{{userId}}/roles/Admin"
+          }
+        },
+        {
+          "name": "Delete user (Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{gateway}}/users/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. IdentityServer",
+      "item": [
+        {
+          "name": "Authorize (authorization code, postman)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{identityServer}}/connect/authorize?client_id=postman&response_type=code&scope=openid profile orders_api products_api orders.read orders.write products.read products.write&redirect_uri=https://oauth.pstmn.io/v1/callback",
+              "host": ["{{identityServer}}"],
+              "path": ["connect", "authorize"],
+              "query": [
+                { "key": "client_id", "value": "postman" },
+                { "key": "response_type", "value": "code" },
+                { "key": "scope", "value": "openid profile orders_api products_api orders.read orders.write products.read products.write" },
+                { "key": "redirect_uri", "value": "https://oauth.pstmn.io/v1/callback" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Exchange authorization code",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": "{{identityServer}}/connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "authorization_code" },
+                { "key": "client_id", "value": "postman" },
+                { "key": "client_secret", "value": "secret" },
+                { "key": "code", "value": "" },
+                { "key": "redirect_uri", "value": "https://oauth.pstmn.io/v1/callback" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Client credentials (aggregator)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.access_token) pm.collectionVariables.set('accessToken', body.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": "{{identityServer}}/connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "client_credentials" },
+                { "key": "client_id", "value": "aggregator_service" },
+                { "key": "client_secret", "value": "aggregator_secret" },
+                { "key": "scope", "value": "orders_api products_api orders.read orders.write products.read products.write" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Scope read on tenders",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/api/tenders/scopes/read"
+          }
+        },
+        {
+          "name": "Scope read on catalog",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/api/products/scopes/read"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Keycloak permission matrix",
+      "item": [
+        {
+          "name": "Token (password grant is not used — paste a realm token into accessToken)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": "{{keycloak}}/realms/DevRealmDrivers/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "orders.postman" },
+                { "key": "client_secret", "value": "postman-dev-secret" },
+                { "key": "username", "value": "john.manager" },
+                { "key": "password", "value": "Manager123!" },
+                { "key": "scope", "value": "openid profile email" }
+              ]
+            },
+            "description": "Direct access grants are off on orders.postman. Use Authorization Code in the browser, then paste access_token into the collection variable. john.manager is the manager used in the lab JWT sample."
+          }
+        },
+        {
+          "name": "GET /orders",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/orders"
+          }
+        },
+        {
+          "name": "POST /orders",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/orders",
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Ремонт мосту\",\n  \"reference\": \"UA-2026-TEST-0001\"\n}" }
+          }
+        },
+        {
+          "name": "PUT /orders/1 (manager = 200)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/orders/1",
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Ремонт проїжджої частини Хрещатика (уточнено)\"\n}" }
+          }
+        },
+        {
+          "name": "DELETE /orders/1 (manager = 403)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{gateway}}/orders/1"
+          }
+        },
+        {
+          "name": "POST /orders/1/approve",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "url": "{{gateway}}/orders/1/approve"
+          }
+        },
+        {
+          "name": "GET /products",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/products"
+          }
+        },
+        {
+          "name": "POST /products",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/products",
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"HEAT\",\n  \"name\": \"Тепломережі\"\n}" }
+          }
+        },
+        {
+          "name": "PUT /products/1",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/products/1",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Дорожнє покриття (оновлено)\"\n}" }
+          }
+        },
+        {
+          "name": "DELETE /products/1",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{gateway}}/products/1"
+          }
+        },
+        {
+          "name": "POST /products/1/publish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "url": "{{gateway}}/products/1/publish"
+          }
+        },
+        {
+          "name": "GET /payments (user = 403)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{gateway}}/payments"
+          }
+        },
+        {
+          "name": "POST /payments/process",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/payments/process",
+            "body": { "mode": "raw", "raw": "{\n  \"tenderReference\": \"UA-2026-KYIV-0142\",\n  \"contractorName\": \"ТОВ Шляхбуд\",\n  \"amount\": 4900000\n}" }
+          }
+        },
+        {
+          "name": "POST /payments/refund",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{gateway}}/payments/refund",
+            "body": { "mode": "raw", "raw": "{\n  \"paymentId\": 1\n}" }
+          }
+        }
+      ]
+    }
+  ]
+}

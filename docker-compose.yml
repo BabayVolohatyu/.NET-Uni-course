@@ -1,0 +1,53 @@
+# Docker Compose for the Procurement Risk Assessment Platform
+# Runs SQL Server and MongoDB containers needed by all services.
+#
+# Usage:
+#   docker compose up -d          # start all containers
+#   docker compose logs -f        # follow logs
+#   docker compose down           # stop (data volumes persist)
+#   docker compose down -v        # stop + DELETE all data
+#
+# Wait ~30 s after start before connecting — SQL Server and MongoDB take time to initialize.
+
+version: "3.9"
+
+services:
+  # ── SQL Server (shared across Tenders [P1] and Catalog [P2]) ─────────────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: procurement_sqlserver
+    environment:
+      SA_PASSWORD: "YourStrong!Passw0rd"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P 'YourStrong!Passw0rd' -Q 'SELECT 1' -C -b -o /dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── MongoDB (P3 RiskAssessment). The Lab 04 service selects database RiskAssessment itself.
+  mongodb:
+    image: mongo:7
+    container_name: procurement_mongodb
+    environment:
+      MONGO_INITDB_DATABASE: procurement_risk
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  sqlserver_data:
+  mongodb_data:
