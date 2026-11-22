@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using RiskAssessments.WebApi.Metrics;
 using RiskAssessments.Application.Common.Models;
 using RiskAssessments.Application.RiskAssessments.Commands.AddTriggeredFlag;
 using RiskAssessments.Application.RiskAssessments.Commands.CreateRiskAssessment;
@@ -13,7 +14,7 @@ using RiskAssessments.Application.RiskAssessments.Queries.SearchRiskAssessments;
 namespace RiskAssessments.WebApi.Controllers;
 
 [Route("api/risk-assessments")]
-public sealed class RiskAssessmentsController(MediatR.ISender mediator) : ApiControllerBase(mediator)
+public sealed class RiskAssessmentsController(MediatR.ISender mediator, RiskAssessmentMetrics metrics) : ApiControllerBase(mediator)
 {
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<RiskAssessmentDto>), StatusCodes.Status200OK)]
@@ -52,7 +53,9 @@ public sealed class RiskAssessmentsController(MediatR.ISender mediator) : ApiCon
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RiskAssessmentDetailsDto>> GetById(string id, CancellationToken ct)
     {
-        var assessment = await Mediator.Send(new GetRiskAssessmentByIdQuery(id), ct);
+        var assessment = await metrics.MeasureAsync(
+            "get",
+            () => Mediator.Send(new GetRiskAssessmentByIdQuery(id), ct));
         Response.Headers.ETag = $"\"{assessment.Version}\"";
         return Ok(assessment);
     }
@@ -63,7 +66,8 @@ public sealed class RiskAssessmentsController(MediatR.ISender mediator) : ApiCon
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<string>> Create(CreateRiskAssessmentCommand command, CancellationToken ct)
     {
-        var id = await Mediator.Send(command, ct);
+        var id = await metrics.MeasureAsync("create", () => Mediator.Send(command, ct));
+        metrics.AssessmentCreated(command.RiskLevel);
         return CreatedAtAction(nameof(GetById), new { id }, id);
     }
 
@@ -78,9 +82,12 @@ public sealed class RiskAssessmentsController(MediatR.ISender mediator) : ApiCon
         [FromHeader(Name = "If-Match")] string? ifMatch,
         CancellationToken ct)
     {
-        var updated = await Mediator.Send(
-            new UpdateRiskAssessmentCommand(id, body.OverallRiskScore, body.RiskLevel, ReadVersion(ifMatch)),
-            ct);
+        var updated = await metrics.MeasureAsync(
+            "update",
+            () => Mediator.Send(
+                new UpdateRiskAssessmentCommand(id, body.OverallRiskScore, body.RiskLevel, ReadVersion(ifMatch)),
+                ct));
+        metrics.AssessmentUpdated("updated");
         Response.Headers.ETag = $"\"{updated.Version}\"";
         return Ok(updated);
     }
@@ -95,7 +102,10 @@ public sealed class RiskAssessmentsController(MediatR.ISender mediator) : ApiCon
         [FromHeader(Name = "If-Match")] string? ifMatch,
         CancellationToken ct)
     {
-        await Mediator.Send(new DeleteRiskAssessmentCommand(id, ReadVersion(ifMatch)), ct);
+        await metrics.MeasureAsync(
+            "delete",
+            () => Mediator.Send(new DeleteRiskAssessmentCommand(id, ReadVersion(ifMatch)), ct));
+        metrics.AssessmentDeleted();
         return NoContent();
     }
 
@@ -110,16 +120,19 @@ public sealed class RiskAssessmentsController(MediatR.ISender mediator) : ApiCon
         [FromHeader(Name = "If-Match")] string? ifMatch,
         CancellationToken ct)
     {
-        var updated = await Mediator.Send(new AddTriggeredFlagCommand(
-            id,
-            body.RuleCode,
-            body.Severity,
-            body.Description,
-            body.AffectedField,
-            body.ContractorId,
-            body.CompanyAgeDays,
-            body.AuthorizedCapital,
-            ReadVersion(ifMatch)), ct);
+        var updated = await metrics.MeasureAsync(
+            "add_flag",
+            () => Mediator.Send(new AddTriggeredFlagCommand(
+                id,
+                body.RuleCode,
+                body.Severity,
+                body.Description,
+                body.AffectedField,
+                body.ContractorId,
+                body.CompanyAgeDays,
+                body.AuthorizedCapital,
+                ReadVersion(ifMatch)), ct));
+        metrics.AssessmentUpdated("flagged");
         Response.Headers.ETag = $"\"{updated.Version}\"";
         return Ok(updated);
     }

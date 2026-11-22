@@ -8,11 +8,13 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" Version="2.70.0" />
+    <PackageReference Include="Grpc.AspNetCore.HealthChecks" Version="2.70.0" />
     <!-- Lab 06: Redis distributed caching via Aspire integration -->
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="9.3.0" />
     <!-- Lab 06: in-memory caching -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.5" />
     <PackageReference Include="AspNetCore.HealthChecks.MongoDb" Version="9.0.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="11.0.1" />
   </ItemGroup>

@@ -15,6 +15,7 @@
     <PackageReference Include="MongoDB.Bson" Version="3.14.0" />
     <!-- Lab 06: caching (IMemoryCache, IDistributedCache) -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.8" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
   </ItemGroup>
 
   <PropertyGroup>

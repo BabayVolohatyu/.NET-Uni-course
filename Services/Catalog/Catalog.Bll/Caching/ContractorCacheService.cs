@@ -4,6 +4,7 @@ using Catalog.Bll.Queries;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 using System.Text.Json;
 
 namespace Catalog.Bll.Caching;
@@ -145,10 +146,10 @@ public sealed class ContractorCacheService : IContractorService
                 return value;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            // Redis unavailable — degrade gracefully
-            _logger.LogWarning(ex, "Redis L2 unavailable for key {Key}, falling through to DB", key);
+            // Cache is optional. The inner service reads ContractorRegistry.
+            _logger.LogWarning(ex, "Redis unavailable, falling back to database for {Key}", key);
         }
 
         _metrics.RecordMiss("L2");
@@ -166,9 +167,9 @@ public sealed class ContractorCacheService : IContractorService
                 L2Options,
                 ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            _logger.LogWarning(ex, "Failed to populate Redis L2 for key {Key}", key);
+            _logger.LogWarning(ex, "Redis unavailable, value for {Key} not cached", key);
         }
 
         _l1.Set(key, value, L1Options);
@@ -179,7 +180,7 @@ public sealed class ContractorCacheService : IContractorService
     private void Invalidate(string key, string reason)
     {
         _l1.Remove(key);
-        _ = _l2.RemoveAsync(key);
+        _ = RemoveQuietlyAsync(key);
         _logger.LogInformation("Cache invalidated {Key}, reason {Reason}", key, reason);
         _metrics.RecordInvalidation(reason);
     }
@@ -194,8 +195,20 @@ public sealed class ContractorCacheService : IContractorService
         var version = _l1.Get<long>(versionKey);
         _l1.Set(versionKey, version + 1,
             new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1) });
-        _ = _l2.RemoveAsync(versionKey);
+        _ = RemoveQuietlyAsync(versionKey);
         _logger.LogInformation("Cache list version bumped, reason {Reason}", reason);
         _metrics.RecordInvalidation(reason);
+    }
+
+    private async Task RemoveQuietlyAsync(string key)
+    {
+        try
+        {
+            await _l2.RemoveAsync(key);
+        }
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
+        {
+            _logger.LogWarning(ex, "Redis unavailable, value for {Key} not invalidated", key);
+        }
     }
 }

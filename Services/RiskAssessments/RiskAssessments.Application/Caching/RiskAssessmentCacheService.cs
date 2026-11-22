@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using RiskAssessments.Application.Common.Interfaces;
+using StackExchange.Redis;
 using RiskAssessments.Application.Common.Models;
 using RiskAssessments.Application.RiskAssessments.Dtos;
 using System.Text.Json;
@@ -122,9 +123,10 @@ public sealed class RiskAssessmentCacheService : IRiskAssessmentQueries
                 return value;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            _logger.LogWarning(ex, "Redis L2 unavailable for key {Key}, falling through to DB", key);
+            // Cache is optional. The inner queries read the riskAssessments collection.
+            _logger.LogWarning(ex, "Redis unavailable, falling back to database for {Key}", key);
         }
 
         _metrics.RecordMiss("L2");
@@ -141,9 +143,9 @@ public sealed class RiskAssessmentCacheService : IRiskAssessmentQueries
                 L2Options,
                 ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            _logger.LogWarning(ex, "Failed to populate Redis L2 for key {Key}", key);
+            _logger.LogWarning(ex, "Redis unavailable, value for {Key} not cached", key);
         }
 
         _l1.Set(key, value, L1Options);

@@ -1,4 +1,6 @@
 using Catalog.Api.Grpc;
+using Catalog.Api.HealthChecks;
+using Catalog.Api.Metrics;
 using Catalog.Api.Middleware;
 using Catalog.Bll.Caching;
 using Catalog.Bll.Interfaces;
@@ -29,10 +31,14 @@ builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);
 
 // ── Lab 06: Distributed Redis cache (Aspire integration) ─────────────────────
 // Aspire injects ConnectionStrings:redis automatically via WithReference(redis).
-builder.AddRedisDistributedCache("redis");
+// Lab 07: built-in Redis health check is off so we can report Degraded, not Unhealthy.
+builder.AddRedisDistributedCache("redis", settings => settings.DisableHealthChecks = true);
 
 // ── Lab 06: Cache metrics (OpenTelemetry custom counters) ─────────────────────
 builder.Services.AddSingleton<CacheMetrics>();
+
+// ── Lab 07: business counters, histograms, gauges ────────────────────────────
+builder.Services.AddSingleton<ContractorMetrics>();
 
 // ── Database: EF Core + SQL Server ────────────────────────────────────────────
 // When running under Aspire (AppHost), Aspire injects ConnectionStrings:ContractorRegistry
@@ -74,6 +80,10 @@ builder.Services.AddValidatorsFromAssemblyContaining<CreateContractorDtoValidato
 
 // ── Lab 06: gRPC server ───────────────────────────────────────────────────────
 builder.Services.AddGrpc(o => o.Interceptors.Add<Catalog.Api.Grpc.LoggingInterceptor>());
+
+// ── Lab 07: gRPC health protocol + SQL/Redis checks ──────────────────────────
+builder.Services.AddGrpcHealthChecks();
+builder.AddCatalogHealthChecks(connectionString);
 
 // ── Controllers ────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -139,7 +149,8 @@ app.MapControllers();
 // ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────
 app.MapGrpcService<ContractorsGrpcService>();
 
-// ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
+// Lab 07: grpc.health.v1.Health plus /health/live and /health/ready (all environments).
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 
 app.Run();

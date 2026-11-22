@@ -4,6 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Lab 07: RemoveAllResilienceHandlers is experimental (EXTEXP0001) but required
+         so a custom handler does not stack on the ServiceDefaults handler. -->
+    <NoWarn>$(NoWarn);EXTEXP0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +17,7 @@
   <ItemGroup>
     <!-- Lab 06: gRPC client packages -->
     <PackageReference Include="Grpc.Net.ClientFactory" Version="2.70.0" />
+    <PackageReference Include="Grpc.HealthCheck" Version="2.70.0" />
     <PackageReference Include="Google.Protobuf" Version="3.31.1" />
     <PackageReference Include="Grpc.Tools" Version="2.70.0">
       <PrivateAssets>all</PrivateAssets>
@@ -21,6 +25,10 @@
     </PackageReference>
     <!-- Lab 06: Redis distributed caching for aggregated responses -->
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="9.3.0" />
+    <!-- Lab 07: per-client retry / circuit breaker / timeout. Do not stack on ServiceDefaults. -->
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="9.3.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
     <!-- Swagger/OpenAPI for the Aggregator -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="11.0.1" />
   </ItemGroup>

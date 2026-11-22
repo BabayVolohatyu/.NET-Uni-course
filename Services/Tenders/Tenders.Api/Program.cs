@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Tenders.Api.Grpc;
+using Tenders.Api.HealthChecks;
+using Tenders.Api.Metrics;
 using Tenders.Api.Middleware;
 using Tenders.Bll.Caching;
 using Tenders.Bll.Interfaces;
@@ -26,11 +28,15 @@ builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);
 
 // ── Lab 06: Distributed Redis cache (Aspire integration) ─────────────────────
 // Aspire injects ConnectionStrings:redis automatically via WithReference(redis).
-// No need to set the address manually in appsettings.
-builder.AddRedisDistributedCache("redis");
+// Lab 07 disables Aspire's built-in Redis health check (it would report Unhealthy).
+// TenderHealthChecks registers redis-cache as Degraded instead.
+builder.AddRedisDistributedCache("redis", settings => settings.DisableHealthChecks = true);
 
 // ── Lab 06: Cache metrics (OpenTelemetry custom counters) ─────────────────────
 builder.Services.AddSingleton<CacheMetrics>();
+
+// ── Lab 07: business counters, histograms, gauges ────────────────────────────
+builder.Services.AddSingleton<TenderMetrics>();
 
 // ── Connection string ──────────────────────────────────────────────────────────
 // When running under Aspire (AppHost), Aspire injects ConnectionStrings:ProcurementBidding
@@ -69,6 +75,10 @@ builder.Services.AddAutoMapper(cfg =>
 // AddGrpc must be called before AddControllers.
 // LoggingInterceptor (in Tenders.Api.Grpc) logs every RPC call with method, peer, status, elapsed.
 builder.Services.AddGrpc(o => o.Interceptors.Add<Tenders.Api.Grpc.LoggingInterceptor>());
+
+// ── Lab 07: standard gRPC health protocol + SQL/Redis checks ─────────────────
+builder.Services.AddGrpcHealthChecks();
+builder.AddTenderHealthChecks(connectionString);
 
 // ── Controllers ────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -121,8 +131,10 @@ app.MapControllers();
 // MapGrpcService must come after UseRouting (implicit in .NET 8+).
 app.MapGrpcService<TendersGrpcService>();
 
-// ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
-// These are consumed by Aspire Dashboard to display service readiness status.
+// Lab 07: grpc.health.v1.Health reports the same ASP.NET Core checks.
+// MapDefaultEndpoints publishes /health, /health/live, /health/ready, /alive
+// in every environment (not only Development).
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 
 app.Run();

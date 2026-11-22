@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Tenders.Api.Metrics;
 using Tenders.Bll.Dtos;
 using Tenders.Bll.Interfaces;
 
@@ -11,7 +12,7 @@ namespace Tenders.Api.Controllers;
 [ApiController]
 [Route("api/tenders/{tenderId:long}/bids")]
 [Produces("application/json")]
-public class BidsController(IBidService bidService) : ControllerBase
+public class BidsController(IBidService bidService, TenderMetrics metrics) : ControllerBase
 {
     /// <summary>Get all bids for a tender sorted by ProposedPrice ASC.</summary>
     [HttpGet]
@@ -32,7 +33,10 @@ public class BidsController(IBidService bidService) : ControllerBase
     public async Task<ActionResult<BidDto>> SubmitBid(
         long tenderId, SubmitBidDto dto, CancellationToken ct)
     {
-        var created = await bidService.SubmitBidAsync(tenderId, dto, ct);
+        var created = await metrics.MeasureAsync(
+            "submit_bid",
+            () => bidService.SubmitBidAsync(tenderId, dto, ct));
+        metrics.BidSubmitted();
         return Created($"api/tenders/{tenderId}/bids", created);
     }
 
@@ -49,7 +53,10 @@ public class BidsController(IBidService bidService) : ControllerBase
     public async Task<IActionResult> AwardTender(
         long tenderId, AwardTenderDto dto, CancellationToken ct)
     {
-        await bidService.AwardTenderAsync(tenderId, dto, ct);
+        await metrics.MeasureAsync(
+            "award",
+            () => bidService.AwardTenderAsync(tenderId, dto, ct));
+        metrics.TenderAwarded();
         return NoContent();
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Tenders.Api.Metrics;
 using Tenders.Bll.Dtos;
 using Tenders.Bll.Interfaces;
 
@@ -13,7 +14,7 @@ namespace Tenders.Api.Controllers;
 [ApiController]
 [Route("api/tenders")]
 [Produces("application/json")]
-public class TendersController(ITenderService tenderService) : ControllerBase
+public class TendersController(ITenderService tenderService, TenderMetrics metrics) : ControllerBase
 {
     /// <summary>Get a tender with its full details.</summary>
     [HttpGet("{id:long}")]
@@ -21,7 +22,7 @@ public class TendersController(ITenderService tenderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<TenderWithDetailsDto>> GetById(long id, CancellationToken ct)
     {
-        var tender = await tenderService.GetTenderByIdAsync(id, ct);
+        var tender = await metrics.MeasureAsync("get", () => tenderService.GetTenderByIdAsync(id, ct));
         return tender is null ? NotFound() : Ok(tender);
     }
 
@@ -42,7 +43,8 @@ public class TendersController(ITenderService tenderService) : ControllerBase
     public async Task<ActionResult<TenderWithDetailsDto>> Create(
         CreateTenderDto dto, CancellationToken ct)
     {
-        var created = await tenderService.CreateTenderAsync(dto, ct);
+        var created = await metrics.MeasureAsync("create", () => tenderService.CreateTenderAsync(dto, ct));
+        metrics.TenderCreated(created.Status);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -58,7 +60,10 @@ public class TendersController(ITenderService tenderService) : ControllerBase
     public async Task<IActionResult> ChangeStatus(
         long id, ChangeTenderStatusDto dto, CancellationToken ct)
     {
-        await tenderService.ChangeTenderStatusAsync(id, dto.NewStatus, dto.Reason, ct);
+        await metrics.MeasureAsync(
+            "status_change",
+            () => tenderService.ChangeTenderStatusAsync(id, dto.NewStatus, dto.Reason, ct));
+        metrics.TenderStatusChanged(dto.NewStatus);
         return NoContent();
     }
 

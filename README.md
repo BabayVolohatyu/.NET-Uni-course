@@ -673,3 +673,113 @@ dotnet run --project Services\Tenders\Tenders.Api
 dotnet run --project Services\Catalog\Catalog.Api
 dotnet run --project Services\RiskAssessments\RiskAssessments.WebApi
 ```
+
+---
+
+## Lab 07 — Resilience, business metrics, and health checks
+
+Temporary failures are retried. A dependency that keeps failing opens a circuit breaker and calls fail fast. Redis is optional: if it is down, each service reads its own database and `/health/ready` reports **Degraded**, not Unhealthy. Liveness does not touch databases.
+
+### Resilience policies (Aggregator clients)
+
+The standard handler is installed once, in `Platform.ServiceDefaults` (`ConfigureHttpClientDefaults`). Each Aggregator client calls `RemoveAllResilienceHandlers()` and then adds **one** custom handler, so pipelines are not stacked.
+
+gRPC status `Unavailable` is HTTP 200 plus trailers, so the HTTP handler does not retry it. Every gRPC channel also has a `ServiceConfig` `RetryPolicy` for `Unavailable` and `ResourceExhausted`. `MaxAttempts` includes the original call.
+
+`SamplingDuration` is at least twice `AttemptTimeout`. `MinimumThroughput` is lowered from the production default of 100 so a short failure burst on this stand can open the breaker.
+
+| Client | Role | HTTP retries | Backoff | Attempt / total timeout | Circuit breaker | gRPC `MaxAttempts` | Why |
+|--------|------|--------------|---------|-------------------------|-----------------|--------------------|-----|
+| `catalog-api` | **Critical.** The dossier cannot name who bid, or explain a shell-company flag, without the contractor registry. | 5, jitter | Exponential, 200 ms base | 3 s / 30 s | Failure ratio **0.3**, minimum throughput **5**, window **30 s**, break **15 s**. Opens, half-opens, and closes are logged. | 5 | More retries and a sensitive breaker. Losing the registry hides collusion. |
+| `tenders-api` | **Critical.** Without the tender there is nothing to audit. | 4, jitter | Exponential, 200 ms base | 3 s / 25 s | Failure ratio **0.25** (stricter than catalog), minimum throughput **5**, window **30 s**, break **20 s**. Logged transitions. | 4 | The tender is the spine of the dossier. Fail fast once the breaker has evidence, but retry brief blips. |
+| `risk-assessments-api` | **Non-critical.** Flags enrich the dossier. The Aggregator already returns the tender and contractors with a warning. | 1, jitter | Exponential, 200 ms base | 2 s / 6 s | Failure ratio **0.7** (tolerant), minimum throughput **6**, window **20 s**, break **10 s**. Logged transitions. | 2 | Give up quickly and return a partial dossier instead of holding the auditor. |
+| `procurement-commands` | **Writes** (publish a tender, award a bid). Not used by the read aggregator. | 3, jitter, **`DisableForUnsafeHttpMethods()`** | Exponential, 1 s base | 3 s / 20 s | Failure ratio 0.5, minimum throughput 5, window 30 s, break 15 s. | — | POST/PUT/DELETE are not retried, so a retried award cannot be applied twice. GET still retries. |
+
+Read RPCs travel as HTTP POST, but they are idempotent queries, so the three read clients keep HTTP retries for connection failures. That is what produces `resilience.polly.strategy.events` with `event.name = OnRetry` when a service is stopped. gRPC `RetryPolicy` covers `Unavailable` on top of that.
+
+### Business metrics
+
+Meters are created with `IMeterFactory`, registered as singletons, and exported from ServiceDefaults (`AddMeter`, including `Polly`).
+
+| Meter | Instruments | Tags (bounded) |
+|-------|-------------|----------------|
+| `Tenders.Api` | `tenders.created`, `tenders.status_changed`, `bids.submitted`, `tenders.awarded`, histogram `tenders.operation.duration`, gauges `tenders.awaiting_publication` and `tenders.operations.inflight` | `tender.status` (Draft, Published, BiddingOpen, EvaluationInProgress, Awarded, Cancelled, Other), `operation`, `status` = success \| failure |
+| `Catalog.Api` | `contractors.registered`, `contractors.changed`, histogram `contractors.operation.duration`, gauges `contractors.active` and `contractors.operations.inflight` | `contractor.result` (registered, updated, removed, activated, deactivated) |
+| `RiskAssessments.Api` | `risk_assessments.created`, `risk_assessments.updated`, histogram `risk_assessments.operation.duration`, gauges `risk_assessments.open` and `risk_assessments.operations.inflight` | `risk.level` (Low, Medium, High, Critical, Other) |
+| `Platform.Aggregator` | `aggregator.dossiers`, histogram `aggregator.operation.duration`, gauge `aggregator.operations.inflight` | `result` = complete \| partial |
+| `Polly` | `resilience.polly.strategy.events`, `resilience.polly.strategy.attempt.duration`, `resilience.polly.pipeline.duration` | `event.name` (OnRetry, OnCircuitOpened, OnCircuitHalfOpened, OnCircuitClosed, OnTimeout), `pipeline.name` |
+
+Histograms record **every** execution, including failures. No tag carries a tender id, contractor id, EDRPOU, or auditor id.
+
+Gauges are process-local snapshots (in-flight work, and drafts or assessments this process has created). They are not a cluster-wide count.
+
+### What to watch in the Aspire Dashboard
+
+Aspire Dashboard is a development tool. Production would use Grafana, Prometheus, or Azure Monitor. These are the signals worth keeping on screen while developing.
+
+| Signal | Where | Healthy range on this stand | Filter when something looks wrong |
+|--------|-------|-----------------------------|-----------------------------------|
+| `tenders.created` | Metrics, meter `Tenders.Api` | Grows by 1 per created tender. Split by `tender.status`. | Flat while POSTs return 201 — meter name missing from ServiceDefaults. |
+| `tenders.operation.duration` | Metrics | Most creates under a few hundred milliseconds against local SQL. | `status = failure` or a p95 that jumps after a retry policy change. |
+| `contractors.active` / `risk_assessments.open` | Metrics | Move with register and delete calls in this process. | — |
+| `aggregator.dossiers` | Metrics | `result = complete` while all three services are up. | `result = partial` means risk assessments (or another optional call) failed open. |
+| `resilience.polly.strategy.events` | Metrics, meter `Polly` | Rare `OnRetry`. `OnCircuitOpened` should be absent in normal use. | `event.name = OnRetry` or `OnCircuitOpened`, then narrow by `pipeline.name`. |
+| Structured logs | Logs | One chain per `CorrelationId`, property `ServiceName`. | Category `Polly` or message "Circuit opened". Level Error for open, Information for close. |
+| Traces | Traces | Gateway → Aggregator → three services → SQL or Mongo. | Several spans with the same RPC name are retries. Compare duration before and after a policy change. |
+| Resources | Resources | Green while `/health` returns 200. | Red when SQL or Mongo is down (`/health` is 503). Redis down stays green on `/health` because Degraded is HTTP 200; the JSON of `/health/ready` shows `redis-cache: Degraded`. |
+
+### Health endpoints
+
+Mapped in every environment by `MapDefaultEndpoints` (not only Development):
+
+| Path | What it runs | SQL stopped | Redis stopped |
+|------|----------------|-------------|---------------|
+| `/health/live`, `/alive` | Tag `live` only (the process) | **200** | **200** |
+| `/health/ready` | Tag `ready`. JSON lists each check. | **503**, body `Unhealthy` | **200**, body `Degraded`, check `redis-cache` is Degraded |
+| `/health` | Every check. Aspire `WithHttpHealthCheck("/health")` polls this. `WaitFor` waits until it succeeds. | **503** | **200** (Degraded is still success for the probe) |
+
+Checks:
+
+| Check | Service | Failure status | Tags |
+|-------|---------|----------------|------|
+| `tenders-db` | Tenders.Api | Unhealthy | `database`, `sql`, `ready`. Query is `SELECT 1`. Timeout 5 s. |
+| `catalog-db` | Catalog.Api | Unhealthy | `database`, `sql`, `ready`. Query is `SELECT 1`. Timeout 5 s. |
+| `risk-assessments-db` | RiskAssessments.WebApi | Unhealthy | `database`, `mongodb`, `ready`. Ping. Timeout 5 s. |
+| `redis-cache` | Each service and the Aggregator | **Degraded** | `cache`, `redis`, `ready`. `PING`. Timeout 3 s. |
+| `tenders-api`, `catalog-api` | Aggregator, via `grpc.health.v1.Health` | Unhealthy | `grpc`, `downstream`, `ready`. Deadline 2 s. |
+| `risk-assessments-api` | Aggregator | **Degraded** | same. A partial dossier is still served. |
+
+Each gRPC server maps `MapGrpcHealthChecksService()`. `RpcException` on the Aggregator probe becomes Unhealthy and is logged.
+
+### Run and check
+
+```powershell
+cd Platform.AppHost
+dotnet user-secrets set "sql-password" "YourStrong!Passw0rd"
+cd ..
+dotnet run --project Platform.AppHost
+```
+
+Gateway: `http://localhost:5000`. Dashboard URL is printed at startup.
+
+```powershell
+# Health of a service that owns a database — use the tenders-api URL from the
+# Dashboard, not the gateway. The gateway does not check SQL.
+# Stop SQL: /health/live stays 200, /health/ready returns 503.
+# Stop Redis: /health/ready stays 200 and the JSON body says Degraded on redis-cache.
+curl http://localhost:<tenders-api-port>/health/live
+curl http://localhost:<tenders-api-port>/health/ready
+
+# Create a tender — tenders.created increases, tenders.operation.duration records the call.
+curl -X POST http://localhost:5000/api/tenders `
+  -H "Content-Type: application/json" `
+  -d '{"procuringEntityId":1,"title":"School roof repair","expectedBudget":2500000,"description":"Roof","deliveryAddress":"Kyiv"}'
+
+# Stop risk-assessments-api in the Dashboard for 5–10 s, then:
+curl http://localhost:5000/api/aggregator/tenders/1/full
+# HTTP 200, warnings mention risk-assessments-api, Polly metric OnRetry for that pipeline.
+# A longer outage opens the breaker (log: "Circuit opened", metric OnCircuitOpened).
+# After BreakDuration (10 s) a trial call runs (half-open) and the circuit closes if it succeeds.
+```
+
+Stopping Redis: `/health/ready` JSON shows `redis-cache` as `Degraded` and the APIs still respond from SQL Server or MongoDB. Stopping SQL Server: `/health/live` is 200 and `/health/ready` is 503.

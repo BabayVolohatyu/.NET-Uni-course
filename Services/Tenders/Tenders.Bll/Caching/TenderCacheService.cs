@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 using System.Text.Json;
 using Tenders.Bll.Dtos;
 using Tenders.Bll.Interfaces;
@@ -148,10 +149,10 @@ public sealed class TenderCacheService : ITenderService
                 return value;
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            // Redis unavailable — degrade gracefully (fall through to DB)
-            _logger.LogWarning(ex, "Redis L2 unavailable for key {Key}, falling through to DB", key);
+            // Cache is optional. The inner service reads ProcurementBidding.
+            _logger.LogWarning(ex, "Redis unavailable, falling back to database for {Key}", key);
         }
 
         _metrics.RecordMiss("L2");
@@ -169,9 +170,9 @@ public sealed class TenderCacheService : ITenderService
                 L2Options,
                 ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            _logger.LogWarning(ex, "Failed to populate Redis L2 for key {Key}", key);
+            _logger.LogWarning(ex, "Redis unavailable, value for {Key} not cached", key);
         }
 
         _l1.Set(key, value, L1Options);
@@ -182,9 +183,20 @@ public sealed class TenderCacheService : ITenderService
     private void Invalidate(string key, string reason)
     {
         _l1.Remove(key);
-        // Fire-and-forget Redis removal (non-critical path)
-        _ = _l2.RemoveAsync(key);
+        _ = RemoveQuietlyAsync(key);
         _logger.LogInformation("Cache invalidated {Key}, reason {Reason}", key, reason);
         _metrics.RecordInvalidation(reason);
+    }
+
+    private async Task RemoveQuietlyAsync(string key)
+    {
+        try
+        {
+            await _l2.RemoveAsync(key);
+        }
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
+        {
+            _logger.LogWarning(ex, "Redis unavailable, value for {Key} not invalidated", key);
+        }
     }
 }

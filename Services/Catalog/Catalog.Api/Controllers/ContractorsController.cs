@@ -1,3 +1,4 @@
+using Catalog.Api.Metrics;
 using Catalog.Bll.DTOs;
 using Catalog.Bll.Interfaces;
 using Catalog.Bll.Queries;
@@ -23,7 +24,7 @@ namespace Catalog.Api.Controllers;
 [ApiController]
 [Route("api/contractors")]
 [Produces("application/json")]
-public sealed class ContractorsController(IContractorService service) : ControllerBase
+public sealed class ContractorsController(IContractorService service, ContractorMetrics metrics) : ControllerBase
 {
     // GET api/contractors?page=1&pageSize=20&search=&sortBy=name&sortDir=asc
     [HttpGet]
@@ -38,7 +39,7 @@ public sealed class ContractorsController(IContractorService service) : Controll
     [ProducesResponseType<ContractorWithDetailsDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ContractorWithDetailsDto>> GetById(int id, CancellationToken ct)
-        => Ok(await service.GetByIdAsync(id, ct));
+        => Ok(await metrics.MeasureAsync("get", () => service.GetByIdAsync(id, ct)));
 
     // POST api/contractors
     [HttpPost]
@@ -55,7 +56,8 @@ public sealed class ContractorsController(IContractorService service) : Controll
         if (!result.IsValid)
             return ValidationProblem(new ValidationProblemDetails(result.ToDictionary()));
 
-        var created = await service.CreateAsync(input, ct);
+        var created = await metrics.MeasureAsync("register", () => service.CreateAsync(input, ct));
+        metrics.ContractorRegistered();
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -74,7 +76,8 @@ public sealed class ContractorsController(IContractorService service) : Controll
         if (!result.IsValid)
             return ValidationProblem(new ValidationProblemDetails(result.ToDictionary()));
 
-        var updated = await service.UpdateAsync(id, input, ct);
+        var updated = await metrics.MeasureAsync("update", () => service.UpdateAsync(id, input, ct));
+        metrics.ContractorChanged("updated");
         return Ok(updated);
     }
 
@@ -84,7 +87,8 @@ public sealed class ContractorsController(IContractorService service) : Controll
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        await service.DeleteAsync(id, ct);
+        await metrics.MeasureAsync("delete", () => service.DeleteAsync(id, ct));
+        metrics.ContractorChanged("removed");
         return NoContent();
     }
 
@@ -95,7 +99,8 @@ public sealed class ContractorsController(IContractorService service) : Controll
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Activate(int id, CancellationToken ct)
     {
-        await service.ActivateAsync(id, ct);
+        await metrics.MeasureAsync("activate", () => service.ActivateAsync(id, ct));
+        metrics.ContractorChanged("activated");
         return NoContent();
     }
 
@@ -106,7 +111,8 @@ public sealed class ContractorsController(IContractorService service) : Controll
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Deactivate(int id, CancellationToken ct)
     {
-        await service.DeactivateAsync(id, ct);
+        await metrics.MeasureAsync("deactivate", () => service.DeactivateAsync(id, ct));
+        metrics.ContractorChanged("deactivated");
         return NoContent();
     }
 }

@@ -11,6 +11,7 @@
     <!-- Lab 06: caching abstractions (IMemoryCache, IDistributedCache) — available transitively.
          IMeterFactory is in System.Diagnostics.Metrics namespace (available in .NET 8+ SDK) -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.21" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
   </ItemGroup>
 
   <PropertyGroup>

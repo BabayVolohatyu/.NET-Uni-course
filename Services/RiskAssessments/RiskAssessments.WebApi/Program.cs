@@ -9,6 +9,8 @@ using RiskAssessments.Infrastructure.Persistence;
 using RiskAssessments.Infrastructure.Seeding;
 using RiskAssessments.WebApi.ExceptionHandling;
 using RiskAssessments.WebApi.Grpc;
+using RiskAssessments.WebApi.HealthChecks;
+using RiskAssessments.WebApi.Metrics;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,10 +25,14 @@ builder.AddServiceDefaults();
 builder.Services.AddMemoryCache(o => o.SizeLimit = 10_000);
 
 // ── Lab 06: Distributed Redis cache (Aspire integration) ─────────────────────
-builder.AddRedisDistributedCache("redis");
+// Lab 07: disable Aspire's Redis health check; ours reports Degraded.
+builder.AddRedisDistributedCache("redis", settings => settings.DisableHealthChecks = true);
 
 // ── Lab 06: Cache metrics (OpenTelemetry custom counters) ─────────────────────
 builder.Services.AddSingleton<CacheMetrics>();
+
+// ── Lab 07: business counters, histograms, gauges ────────────────────────────
+builder.Services.AddSingleton<RiskAssessmentMetrics>();
 
 builder.Services
     .AddApplication(builder.Configuration)
@@ -79,12 +85,9 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 // ── Lab 06: gRPC server ───────────────────────────────────────────────────────
 builder.Services.AddGrpc(o => o.Interceptors.Add<RiskAssessments.WebApi.Grpc.LoggingInterceptor>());
 
-builder.Services.AddHealthChecks()
-    .AddMongoDb(
-        clientFactory: sp => sp.GetRequiredService<MongoDbContext>().Client,
-        databaseNameFactory: sp => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<MongoDbOptions>>().Value.DatabaseName,
-        name: "mongodb",
-        timeout: TimeSpan.FromSeconds(3));
+// ── Lab 07: gRPC health protocol + MongoDB ping and Redis (Degraded) ─────────
+builder.Services.AddGrpcHealthChecks();
+builder.AddRiskAssessmentHealthChecks();
 
 var app = builder.Build();
 
@@ -122,9 +125,8 @@ app.MapControllers();
 // ── Lab 06: gRPC endpoints ────────────────────────────────────────────────────
 app.MapGrpcService<RiskAssessmentsGrpcService>();
 
-// ── Lab 05: Health check endpoints (/health and /alive) ───────────────────────
-// MapDefaultEndpoints provides /health (full readiness) and /alive (liveness).
-// The existing .AddHealthChecks().AddMongoDb(...) check is included automatically.
+// Lab 07: grpc.health.v1.Health plus /health/live and /health/ready (all environments).
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 
 app.Run();

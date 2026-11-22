@@ -4,11 +4,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Distributed;
 using Platform.Aggregator.Caching;
 using Platform.Aggregator.Dtos;
+using Platform.Aggregator.Metrics;
 using RiskAssessments.Grpc;
 using System.Diagnostics;
 using System.Text.Json;
 using Tenders.Grpc;
 using GrpcStatus = Grpc.Core.StatusCode;
+using StackExchange.Redis;
 
 namespace Platform.Aggregator.Controllers;
 
@@ -31,6 +33,7 @@ public class AggregatorController(
     RiskAssessmentsService.RiskAssessmentsServiceClient riskClient,
     IDistributedCache cache,
     AggregatorCacheMetrics cacheMetrics,
+    AggregationMetrics aggregationMetrics,
     ILogger<AggregatorController> logger) : ControllerBase
 {
     // ActivitySource for custom business spans — visible in Aspire Dashboard "Traces"
@@ -65,10 +68,13 @@ public class AggregatorController(
         activity?.SetTag("tender.id", tenderId);
 
         logger.LogInformation("Aggregating full tender view for TenderId={TenderId}", tenderId);
+        var sw = Stopwatch.StartNew();
 
         var cacheKey = $"aggregator:tender:{tenderId}:full";
 
         // ── Step 0: Check Redis cache ──────────────────────────────────────────
+        // Cache is optional. A connection or timeout failure falls through to the
+        // services, which read SQL Server and MongoDB.
         try
         {
             var cached = await cache.GetAsync(cacheKey, cancellationToken);
@@ -80,13 +86,14 @@ public class AggregatorController(
                     cacheMetrics.RecordHit(cacheKey);
                     logger.LogDebug("Aggregator cache hit for key {CacheKey}", cacheKey);
                     activity?.SetTag("cache.hit", true);
+                    aggregationMetrics.RecordDuration("assemble", success: true, sw.Elapsed.TotalMilliseconds);
                     return Ok(cachedDto);
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
         {
-            logger.LogWarning(ex, "Redis unavailable for cache key {CacheKey}, proceeding without cache", cacheKey);
+            logger.LogWarning(ex, "Redis unavailable, falling back to database for {Key}", cacheKey);
         }
 
         cacheMetrics.RecordMiss(cacheKey);
@@ -104,6 +111,7 @@ public class AggregatorController(
         catch (RpcException ex) when (ex.StatusCode == GrpcStatus.NotFound)
         {
             logger.LogWarning("Tender {TenderId} not found in tenders-api (gRPC NotFound)", tenderId);
+            aggregationMetrics.RecordDuration("assemble", success: false, sw.Elapsed.TotalMilliseconds);
             return NotFound(new ProblemDetails
             {
                 Title  = "Tender not found",
@@ -114,6 +122,7 @@ public class AggregatorController(
         catch (RpcException ex)
         {
             logger.LogWarning(ex, "tenders-api gRPC call failed for TenderId={TenderId}", tenderId);
+            aggregationMetrics.RecordDuration("assemble", success: false, sw.Elapsed.TotalMilliseconds);
             return NotFound(new ProblemDetails
             {
                 Title  = "Tender not found",
@@ -162,6 +171,7 @@ public class AggregatorController(
 
         var tenderSummary = MapTender(tender);
         var result = new FullTenderDto(tenderSummary, contractorDtos, riskDtos, warnings);
+        aggregationMetrics.DossierAssembled(partial: warnings.Count > 0);
 
         // ── Step 4: Cache complete result (not partial) ───────────────────────
         if (warnings.Count == 0)
@@ -175,9 +185,9 @@ public class AggregatorController(
                     cancellationToken);
                 logger.LogDebug("Aggregated result cached with key {CacheKey}", cacheKey);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is RedisConnectionException or RedisTimeoutException)
             {
-                logger.LogWarning(ex, "Failed to cache aggregated result for key {CacheKey}", cacheKey);
+                logger.LogWarning(ex, "Redis unavailable, value for {Key} not cached", cacheKey);
             }
         }
         else
@@ -185,6 +195,7 @@ public class AggregatorController(
             logger.LogDebug("Partial result for TenderId={TenderId} not cached (has warnings)", tenderId);
         }
 
+        aggregationMetrics.RecordDuration("assemble", success: true, sw.Elapsed.TotalMilliseconds);
         return Ok(result);
     }
 

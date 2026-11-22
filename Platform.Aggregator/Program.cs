@@ -1,10 +1,10 @@
-using Catalog.Grpc;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
 using Platform.Aggregator.Caching;
-using RiskAssessments.Grpc;
+using Platform.Aggregator.HealthChecks;
+using Platform.Aggregator.Metrics;
+using Platform.Aggregator.Resilience;
 using System.Text.Json.Serialization;
-using Tenders.Grpc;
 
 // ── Platform.Aggregator — Aggregator Pattern implementation ───────────────────
 // Receives composite requests → queries multiple microservices in parallel (Task.WhenAll)
@@ -24,24 +24,25 @@ builder.AddServiceDefaults();
 
 // ── Lab 06: Redis distributed cache (Aspire integration) ─────────────────────
 // Aspire injects ConnectionStrings:redis via WithReference(redis) in AppHost.
-builder.AddRedisDistributedCache("redis");
+// Lab 07: Aspire's own Redis health check is disabled. AggregatorHealthChecks
+// registers redis-cache with failure status Degraded — the cache is optional.
+builder.AddRedisDistributedCache("redis", settings => settings.DisableHealthChecks = true);
 
 // ── Lab 06: Aggregator cache metrics ─────────────────────────────────────────
 builder.Services.AddSingleton<AggregatorCacheMetrics>();
 
-// ── Lab 06: gRPC clients ──────────────────────────────────────────────────────
-// AddGrpcClient uses the same HttpClient factory as the previous HTTP clients.
-// Service discovery resolves "https+http://<service-name>" to the actual address.
-// CorrelationIdHandler (registered in ServiceDefaults.ConfigureHttpClientDefaults)
-// adds X-Correlation-Id to outgoing gRPC metadata automatically.
-builder.Services.AddGrpcClient<TendersService.TendersServiceClient>(o =>
-    o.Address = new Uri("https+http://tenders-api"));
+// ── Lab 07: dossier metrics (counter, histogram, gauge) ──────────────────────
+builder.Services.AddSingleton<AggregationMetrics>();
 
-builder.Services.AddGrpcClient<ContractorService.ContractorServiceClient>(o =>
-    o.Address = new Uri("https+http://catalog-api"));
+// ── Lab 06 + 07: gRPC clients ─────────────────────────────────────────────────
+// Service discovery resolves "https+http://<service-name>".
+// Lab 07 replaces the ServiceDefaults handler (RemoveAllResilienceHandlers, then
+// one AddStandardResilienceHandler) and adds a gRPC RetryPolicy per client.
+// Critical: catalog-api, tenders-api. Non-critical: risk-assessments-api.
+builder.AddAggregatorResilience();
 
-builder.Services.AddGrpcClient<RiskAssessmentsService.RiskAssessmentsServiceClient>(o =>
-    o.Address = new Uri("https+http://risk-assessments-api"));
+// ── Lab 07: readiness — Redis Degraded, downstream gRPC health protocol ──────
+builder.AddAggregatorHealthChecks();
 
 // ── Controllers ───────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
@@ -66,6 +67,9 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddProblemDetails();
 
 var app = builder.Build();
+
+// Circuit-breaker transitions log through this logger (OnOpened = Error, OnClosed = Information).
+ResilienceLog.Use(app.Logger);
 
 // ── Middleware pipeline ───────────────────────────────────────────────────────
 app.UseMiddleware<CorrelationIdMiddleware>();

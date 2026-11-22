@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" Version="2.70.0" />
+    <PackageReference Include="Grpc.AspNetCore.HealthChecks" Version="2.70.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.SqlServer" Version="9.0.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <!-- Lab 06: Redis distributed caching via Aspire integration -->
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="9.3.0" />
     <!-- Lab 06: in-memory caching -->

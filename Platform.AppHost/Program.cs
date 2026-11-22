@@ -33,37 +33,44 @@ var redis = builder.AddRedis("redis")
 // ── Microservices (Labs 02–04, extended in Lab 06 with Redis) ─────────────────
 // WithReference injects the connection string; WaitFor ensures the DB is ready first.
 // Lab 06: each service also receives a Redis reference for distributed caching.
+// Lab 07: WithHttpHealthCheck makes WaitFor block until /health returns success,
+// not merely until the process is listening. /health is mapped in every environment.
 var tenders = builder.AddProject<Projects.Tenders_Api>("tenders-api")
     .WithReference(procurementDb).WaitFor(procurementDb)
-    .WithReference(redis).WaitFor(redis);
+    .WithReference(redis).WaitFor(redis)
+    .WithHttpHealthCheck("/health");
 
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WithReference(contractorDb).WaitFor(contractorDb)
-    .WithReference(redis).WaitFor(redis);
+    .WithReference(redis).WaitFor(redis)
+    .WithHttpHealthCheck("/health");
 
 var riskAssessments = builder.AddProject<Projects.RiskAssessments_WebApi>("risk-assessments-api")
     .WithReference(riskAssessmentDb).WaitFor(riskAssessmentDb)
-    .WithReference(redis).WaitFor(redis);
+    .WithReference(redis).WaitFor(redis)
+    .WithHttpHealthCheck("/health");
 
 // ── Aggregator (Lab 06: Redis for caching aggregated responses) ───────────────
 // Receives references to all three microservices (for service discovery).
-// WaitFor ensures services are ready before Aggregator starts calling them.
+// WaitFor waits until each dependency's /health check is healthy.
 // gRPC clients replace HTTP clients for microservice-to-microservice communication.
 var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
     .WithReference(tenders).WaitFor(tenders)
     .WithReference(catalog).WaitFor(catalog)
     .WithReference(riskAssessments).WaitFor(riskAssessments)
-    .WithReference(redis).WaitFor(redis);
+    .WithReference(redis).WaitFor(redis)
+    .WithHttpHealthCheck("/health");
 
 // ── API Gateway (YARP) ────────────────────────────────────────────────────────
 // Fixed port 5000 for convenient development — clients always connect to localhost:5000.
-// Gateway must start last: it depends on Aggregator being ready too.
+// Gateway must start last: it depends on Aggregator being healthy, not merely started.
 builder.AddProject<Projects.Platform_ApiGateway>("gateway")
     .WithHttpEndpoint(port: 5000, name: "public")
     .WithReference(tenders)
     .WithReference(catalog)
     .WithReference(riskAssessments)
     .WithReference(aggregator)
-    .WaitFor(aggregator);
+    .WaitFor(aggregator)
+    .WithHttpHealthCheck("/health");
 
 builder.Build().Run();

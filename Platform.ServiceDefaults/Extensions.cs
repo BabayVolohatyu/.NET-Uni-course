@@ -98,7 +98,14 @@ public static class Extensions
                 .AddMeter("Tenders.Cache")
                 .AddMeter("Catalog.Cache")
                 .AddMeter("RiskAssessments.Cache")
-                .AddMeter("Platform.Aggregator.Cache"))
+                .AddMeter("Platform.Aggregator.Cache")
+                // Lab 07: business meters (IMeterFactory in each service) and Polly resilience events.
+                // Polly publishes resilience.polly.strategy.events (OnRetry, OnCircuitOpened, ...).
+                .AddMeter("Tenders.Api")
+                .AddMeter("Catalog.Api")
+                .AddMeter("RiskAssessments.Api")
+                .AddMeter("Platform.Aggregator")
+                .AddMeter("Polly"))
             .WithTracing(tracing => tracing
                 // Own spans from each service (created with ActivitySource)
                 .AddSource(builder.Environment.ApplicationName)
@@ -124,26 +131,94 @@ public static class Extensions
     public static IHostApplicationBuilder AddDefaultHealthChecks(this IHostApplicationBuilder builder)
     {
         builder.Services.AddHealthChecks()
-            .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
+            // "live" / "startup" never touch SQL, MongoDB, Redis, or downstream gRPC.
+            .AddCheck("self", () => HealthCheckResult.Healthy(), ["live", "startup"]);
         return builder;
     }
 
-    // ── Map /health and /alive endpoints ─────────────────────────────────────────
+    // ── Map health endpoints in every environment ────────────────────────────────
+    // Not gated on Development. Kubernetes probes in Lab 10 call the same paths.
+    //   /health/live    — process only (tag "live"). Must stay under ~100 ms.
+    //   /health/ready   — dependencies tagged "ready", JSON body with each check.
+    //   /health/startup — slow-start gate (tag "startup").
+    //   /health         — every check; Aspire WithHttpHealthCheck polls this path.
+    //   /alive          — same predicate as liveness (Aspire template alias).
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        // /health — full readiness check (all registered checks)
-        app.MapHealthChecks("/health", new HealthCheckOptions
+        var live = new HealthCheckOptions
         {
-            Predicate = _ => true
+            Predicate = check => check.Tags.Contains("live"),
+            ResponseWriter = WriteHealthJson,
+            ResultStatusCodes =
+            {
+                [HealthStatus.Healthy] = StatusCodes.Status200OK,
+                [HealthStatus.Degraded] = StatusCodes.Status200OK,
+                [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable
+            }
+        };
+
+        var ready = new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("ready"),
+            ResponseWriter = WriteHealthJson,
+            ResultStatusCodes =
+            {
+                [HealthStatus.Healthy] = StatusCodes.Status200OK,
+                // Degraded stays HTTP 200 so an optional dependency (Redis) does not
+                // remove the pod from rotation. The JSON body still says "Degraded".
+                [HealthStatus.Degraded] = StatusCodes.Status200OK,
+                [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable
+            }
+        };
+
+        app.MapHealthChecks("/health/live", live);
+        app.MapHealthChecks("/alive", live);
+
+        app.MapHealthChecks("/health/ready", ready);
+
+        app.MapHealthChecks("/health/startup", new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("startup"),
+            ResponseWriter = WriteHealthJson
         });
 
-        // /alive — liveness check (self only — does not check external dependencies)
-        app.MapHealthChecks("/alive", new HealthCheckOptions
+        app.MapHealthChecks("/health", new HealthCheckOptions
         {
-            Predicate = r => r.Tags.Contains("live")
+            Predicate = _ => true,
+            ResponseWriter = WriteHealthJson,
+            ResultStatusCodes =
+            {
+                [HealthStatus.Healthy] = StatusCodes.Status200OK,
+                [HealthStatus.Degraded] = StatusCodes.Status200OK,
+                [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable
+            }
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// JSON body listing every check that ran. Readiness uses this so a stopped Redis
+    /// shows <c>status: Degraded</c> on the redis-cache entry without hiding the others.
+    /// </summary>
+    public static Task WriteHealthJson(HttpContext context, HealthReport report)
+    {
+        context.Response.ContentType = "application/json; charset=utf-8";
+        var payload = new
+        {
+            status = report.Status.ToString(),
+            totalDurationMs = report.TotalDuration.TotalMilliseconds,
+            checks = report.Entries.Select(entry => new
+            {
+                name = entry.Key,
+                status = entry.Value.Status.ToString(),
+                description = entry.Value.Description,
+                durationMs = entry.Value.Duration.TotalMilliseconds,
+                tags = entry.Value.Tags,
+                error = entry.Value.Exception?.Message
+            })
+        };
+        return context.Response.WriteAsJsonAsync(payload);
     }
 }
 
